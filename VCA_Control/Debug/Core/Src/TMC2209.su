@@ -1,0 +1,7 @@
+../Core/Inc/TMC2209.hpp:17:17:void TMC2209::enable()	16	static
+../Core/Inc/TMC2209.hpp:18:17:void TMC2209::disable()	16	static
+../Core/Src/TMC2209.cpp:3:1:TMC2209::TMC2209(GPIO_TypeDef*, uint16_t, GPIO_TypeDef*, uint16_t, TIM_HandleTypeDef*, uint32_t)	24	static
+../Core/Src/TMC2209.cpp:13:6:void TMC2209::begin()	16	static
+../Core/Src/TMC2209.cpp:21:6:void TMC2209::setDirection(Direction)	16	static
+../Core/Src/TMC2209.cpp:29:6:void TMC2209::moveAsync(int32_t, uint32_t)	32	static
+../Core/Src/TMC2209.cpp:56:6:void TMC2209::irqHandler()	16	static
