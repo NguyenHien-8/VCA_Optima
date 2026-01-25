@@ -1,6 +1,6 @@
-../Core/Inc/TMC2209.hpp:24:17:bool TMC2209::isBusy() const	16	static
-../Core/Src/MainApp.cpp:11:6:void App_Setup()	8	static
-../Core/Src/MainApp.cpp:16:6:void App_Loop()	8	static
-../Core/Src/MainApp.cpp:42:17:void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef*)	16	static
-../Core/Src/MainApp.cpp:46:1:void __static_initialization_and_destruction_0()	24	static
-../Core/Src/MainApp.cpp:46:1:cpp)	8	static
+../Core/Src/MainApp.cpp:24:6:void App_Setup()	48	static
+../Core/Src/MainApp.cpp:42:6:void App_Loop()	8	static
+../Core/Src/MainApp.cpp:70:1:void __static_initialization_and_destruction_0()	8	static
+../Core/Src/MainApp.cpp:70:1:void __static_initialization_and_destruction_1()	8	static
+../Core/Src/MainApp.cpp:70:1:cpp)	8	static
+../Core/Src/MainApp.cpp:70:1:cpp)	8	static
