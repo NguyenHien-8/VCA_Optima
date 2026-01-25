@@ -1,6 +1,7 @@
-../Core/Src/MainApp.cpp:24:6:void App_Setup()	48	static
-../Core/Src/MainApp.cpp:42:6:void App_Loop()	8	static
-../Core/Src/MainApp.cpp:70:1:void __static_initialization_and_destruction_0()	8	static
-../Core/Src/MainApp.cpp:70:1:void __static_initialization_and_destruction_1()	8	static
-../Core/Src/MainApp.cpp:70:1:cpp)	8	static
-../Core/Src/MainApp.cpp:70:1:cpp)	8	static
+../Core/Src/MainApp.cpp:24:6:void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef*)	16	static
+../Core/Src/MainApp.cpp:32:6:void App_Setup()	24	static
+../Core/Src/MainApp.cpp:54:6:void App_Loop()	8	static
+../Core/Src/MainApp.cpp:81:1:void __static_initialization_and_destruction_0()	8	static
+../Core/Src/MainApp.cpp:81:1:void __static_initialization_and_destruction_1()	8	static
+../Core/Src/MainApp.cpp:81:1:cpp)	8	static
+../Core/Src/MainApp.cpp:81:1:cpp)	8	static

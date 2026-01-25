@@ -1,8 +1,15 @@
+// ========================== Nguyen Hien ==========================
+// Developer: TRAN NGUYEN HIEN
+// Email: trannguyenhien29085@gmail.com
+// =================================================================
 #include "TMC2209.hpp"
 #include <cmath>
 
-TMC2209::TMC2209()
-    : huart_(nullptr),
+TMC2209::TMC2209():
+
+#ifdef HAL_UART_MODULE_ENABLED
+      huart_(nullptr),
+#endif
       serial_baud_rate_(115200),
       serial_address_(SERIAL_ADDRESS_0),
       dir_gpio_port_(nullptr), dir_gpio_pin_(0),
@@ -10,10 +17,12 @@ TMC2209::TMC2209()
       ms1_gpio_port_(nullptr), ms1_gpio_pin_(0),
       ms2_gpio_port_(nullptr), ms2_gpio_pin_(0),
       step_timer_(nullptr), step_channel_(0),
-      timer_period_(0), // <--- Khởi tạo biến này
-      initialized_(false),
-      cool_step_enabled_(false),
-      toff_(TOFF_DEFAULT)
+      timer_period_(0), initialized_(false),
+      step_angle_(1.8f), cool_step_enabled_(false),
+      toff_(TOFF_DEFAULT),
+	  steps_target_(0), steps_counter_(0),
+	  is_moving_interrupt_(false), current_microsteps_val_(16) // Microstep default 1/16
+
 {
   global_config_.bytes = 0;
   driver_current_.bytes = 0;
@@ -30,40 +39,48 @@ TMC2209::~TMC2209()
   }
 }
 
-// =============================== MANUAL STEP CONTROL ================================ //
-void TMC2209::setup(UART_HandleTypeDef *huart,
-                    GPIO_TypeDef *en_gpio_port, uint16_t en_gpio_pin,
+// ========================= MANUAL STEP CONTROL (NGUYEN HIEN) ======================== //
+// 1. Setup Basic
+void TMC2209::setup(GPIO_TypeDef *en_gpio_port, uint16_t en_gpio_pin,
                     GPIO_TypeDef *dir_gpio_port, uint16_t dir_gpio_pin,
-                    TIM_HandleTypeDef *step_timer, uint32_t step_channel,
-                    GPIO_TypeDef *ms1_gpio_port, uint16_t ms1_gpio_pin,
-                    GPIO_TypeDef *ms2_gpio_port, uint16_t ms2_gpio_pin,
-                    SerialAddress serial_address)
+                    TIM_HandleTypeDef *step_timer, uint32_t step_channel)
 {
-	huart_ = huart;
-	serial_address_ = serial_address;
+    en_gpio_port_ = en_gpio_port;
+    en_gpio_pin_ = en_gpio_pin;
+    dir_gpio_port_ = dir_gpio_port;
+    dir_gpio_pin_ = dir_gpio_pin;
 
-	en_gpio_port_ = en_gpio_port;
-	en_gpio_pin_ = en_gpio_pin;
-	dir_gpio_port_ = dir_gpio_port;
-	dir_gpio_pin_ = dir_gpio_pin;
+    step_timer_ = step_timer;
+    step_channel_ = step_channel;
 
-	step_timer_ = step_timer;
-	step_channel_ = step_channel;
-
-	ms1_gpio_port_ = ms1_gpio_port;
-	ms1_gpio_pin_ = ms1_gpio_pin;
-	ms2_gpio_port_ = ms2_gpio_port;
-	ms2_gpio_pin_ = ms2_gpio_pin;
-
-	// (Default 1/8 step: Low-Low)
-	if (ms1_gpio_port_ && ms2_gpio_port_) {
-	    HAL_GPIO_WritePin(ms1_gpio_port_, ms1_gpio_pin_, GPIO_PIN_RESET);
-	    HAL_GPIO_WritePin(ms2_gpio_port_, ms2_gpio_pin_, GPIO_PIN_RESET);
-	}
-	initialized_ = true;
+    initialized_ = true;
 }
 
-// Unidirectional methods
+// 2. Configuration UART
+#ifdef HAL_UART_MODULE_ENABLED
+void TMC2209::configureUART(UART_HandleTypeDef *huart, SerialAddress serial_address)
+{
+    huart_ = huart;
+    serial_address_ = serial_address;
+}
+#endif
+
+// 3. Pin configuration Microstep (MS1/MS2)
+void TMC2209::configureMicrostepPins(GPIO_TypeDef *ms1_gpio_port, uint16_t ms1_gpio_pin,
+                                     GPIO_TypeDef *ms2_gpio_port, uint16_t ms2_gpio_pin)
+{
+    ms1_gpio_port_ = ms1_gpio_port;
+    ms1_gpio_pin_ = ms1_gpio_pin;
+    ms2_gpio_port_ = ms2_gpio_port;
+    ms2_gpio_pin_ = ms2_gpio_pin;
+
+    if (ms1_gpio_port_ != nullptr && ms2_gpio_port_ != nullptr) {
+        HAL_GPIO_WritePin(ms1_gpio_port_, ms1_gpio_pin_, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(ms2_gpio_port_, ms2_gpio_pin_, GPIO_PIN_RESET);
+    }
+}
+
+/* Unidirectional methods */
 void TMC2209::setHardwareEnablePin(GPIO_TypeDef *gpio_port, uint16_t gpio_pin)
 {
   en_gpio_port_ = gpio_port;
@@ -589,7 +606,7 @@ uint16_t TMC2209::getMicrostepCounter()
   return read(ADDRESS_MSCNT);
 }
 
-// =============================== MANUAL STEP CONTROL ================================ //
+// ========================= MANUAL STEP CONTROL (NGUYEN HIEN) ======================== //
 void TMC2209::setStepFrequency(uint32_t frequency)
 {
   if (frequency == 0) return;
@@ -612,13 +629,13 @@ void TMC2209::setStepFrequency(uint32_t frequency)
   /* 3. CALCULATE THE FREQUENCY OF THE COUNTER (TICK) */
   // Formula: F_tick = Timer_Clock / (PSC + 1)
   // Example: 16MHz / (15 + 1) = 1MHz
-  uint32_t new_arr = (timer_tick_frequency / frequency) - 1;
-  uint32_t new_ccr = new_arr / 2; // Duty Cycle 50%
+  uint32_t Arr = (timer_tick_frequency / frequency) - 1;
+  uint32_t Ccr = Arr / 2; // Duty Cycle 50%
 
   /* 4. Calculating ARR (Auto Reload Register) */
   // Formula: ARR = (F_tick / F_step) - 1
-  __HAL_TIM_SET_AUTORELOAD(step_timer_, new_arr);
-  __HAL_TIM_SET_COMPARE(step_timer_, step_channel_, new_ccr);
+  __HAL_TIM_SET_AUTORELOAD(step_timer_, Arr);
+  __HAL_TIM_SET_COMPARE(step_timer_, step_channel_, Ccr);
 
   /* 5. UPDATE REGISTERS AND FIX DUTY CYCLE ERRORS */
   HAL_TIM_GenerateEvent(step_timer_, TIM_EVENTSOURCE_UPDATE);
@@ -652,7 +669,8 @@ void TMC2209::setDirection(Direction dir) {
 
 void TMC2209::setMicrostepGpio(uint16_t microsteps)
 {
-  if (!ms1_gpio_port_ || !ms2_gpio_port_) return;
+  if (ms1_gpio_port_ == nullptr || ms2_gpio_port_ == nullptr) return;
+  current_microsteps_val_ = microsteps;
 
   GPIO_PinState ms1 = GPIO_PIN_RESET;
   GPIO_PinState ms2 = GPIO_PIN_RESET;
@@ -661,8 +679,8 @@ void TMC2209::setMicrostepGpio(uint16_t microsteps)
   {
     case 8:  ms1 = GPIO_PIN_RESET; ms2 = GPIO_PIN_RESET; break;
     case 16: ms1 = GPIO_PIN_SET;   ms2 = GPIO_PIN_SET; break;
-    case 32: ms1 = GPIO_PIN_SET; ms2 = GPIO_PIN_RESET;   break;
-    case 64: ms1 = GPIO_PIN_RESET;   ms2 = GPIO_PIN_SET;   break;
+    case 32: ms1 = GPIO_PIN_SET;   ms2 = GPIO_PIN_RESET; break;
+    case 64: ms1 = GPIO_PIN_RESET; ms2 = GPIO_PIN_SET;   break;
     default: return;
   }
 
@@ -670,19 +688,88 @@ void TMC2209::setMicrostepGpio(uint16_t microsteps)
   HAL_GPIO_WritePin(ms2_gpio_port_, ms2_gpio_pin_, ms2);
 }
 
-void TMC2209::setSpeedRPM(float rpm, uint16_t Microsteps, float Stepangle)
+void TMC2209::setStepAngle(float angle)
 {
-  if (Stepangle <= 0.0f || rpm < 0.0f || Microsteps == 0) {
+  if (angle > 0.0f) {
+    this->step_angle_ = angle;
+  }
+}
+
+/* 2. RPM calculation function */
+void TMC2209::setSpeedRPM(float rpm, uint16_t Microsteps)
+{
+  if (this->step_angle_ <= 0.0f || rpm < 0.0f || Microsteps == 0) {
       return;
   }
+
   setMicrostepGpio(Microsteps);
 
-  // Freq = (RPM * StepsPerRev * Microsteps) / 60
-  float steps_per_rev = 360.0f / Stepangle;
-  float steps_per_sec = (rpm * steps_per_rev) / 60.0f;
-  float Stepfre = steps_per_sec * (float)Microsteps;
+  float steps_per_rev = 360.0f / this->step_angle_;
 
-  setStepFrequency((uint32_t)Stepfre);
+  float frequency = (rpm * steps_per_rev * (float)Microsteps) / 60.0f;
+
+  setStepFrequency((uint32_t)frequency);
+}
+
+/* 1. Dial specific steps */
+void TMC2209::moveSteps(uint32_t steps, float rpm)
+{
+  if (steps == 0 || step_timer_ == nullptr) return;
+
+  stopMove();
+  steps_target_ = steps;
+  steps_counter_ = 0;
+
+  setSpeedRPM(rpm, current_microsteps_val_);
+  is_moving_interrupt_ = true;
+  __HAL_TIM_CLEAR_FLAG(step_timer_, TIM_FLAG_UPDATE);
+  __HAL_TIM_ENABLE_IT(step_timer_, TIM_IT_UPDATE);
+
+  startStepping();
+}
+
+/* 2. Rotate by an angle (Degrees) */
+void TMC2209::moveDegrees(float degrees, float rpm)
+{
+  if (step_angle_ <= 0.0f) return;
+  // Ex: 90 degrees / 1.8 * 16 = 800 step
+  float steps_float = (degrees / step_angle_) * (float)current_microsteps_val_;
+  uint32_t steps = (uint32_t)steps_float;
+
+  moveSteps(steps, rpm);
+}
+
+/* 3. Stop moving and turn off */
+void TMC2209::stopMove()
+{
+  stopStepping();
+
+  if (step_timer_ != nullptr)
+  {
+    __HAL_TIM_DISABLE_IT(step_timer_, TIM_IT_UPDATE);
+    __HAL_TIM_CLEAR_FLAG(step_timer_, TIM_FLAG_UPDATE);
+    __HAL_TIM_SET_COUNTER(step_timer_, 0);
+  }
+
+  is_moving_interrupt_ = false;
+  steps_counter_ = 0;
+  steps_target_ = 0;
+}
+
+/* 4. Check status */
+bool TMC2209::isMoving() const
+{
+  return is_moving_interrupt_;
+}
+
+/* 5. Interrupt handling function */
+void TMC2209::handleTimerISR()
+{
+  if (is_moving_interrupt_)
+  {
+    steps_counter_++;
+    if (steps_counter_ >= steps_target_) stopMove();
+  }
 }
 // ==================================================================================== //
 
@@ -726,35 +813,28 @@ void TMC2209::initialize(SerialAddress serial_address)
   disableAutomaticGradientAdaptation();
 }
 
+#ifdef HAL_UART_MODULE_ENABLED
 uint32_t TMC2209::serialAvailable()
 {
-  if (huart_ == nullptr)
-    return 0;
-
+  if (huart_ == nullptr) return 0;
   // Check if data is available in receive buffer
   return (huart_->RxXferSize > 0) ? 1 : 0;
 }
 
 void TMC2209::serialWrite(uint8_t c)
 {
-  if (huart_ == nullptr)
-    return;
-
+  if (huart_ == nullptr) return;
   HAL_UART_Transmit(huart_, &c, 1, 1000);
 }
 
 int TMC2209::serialRead()
 {
-  if (huart_ == nullptr)
-    return -1;
-
+  if (huart_ == nullptr) return -1;
   uint8_t data = 0;
-  if (HAL_UART_Receive(huart_, &data, 1, 100) == HAL_OK)
-  {
-    return data;
-  }
+  if (HAL_UART_Receive(huart_, &data, 1, 100) == HAL_OK) return data;
   return -1;
 }
+#endif
 
 void TMC2209::setOperationModeToSerial(SerialAddress serial_address)
 {
@@ -860,6 +940,8 @@ uint8_t TMC2209::calculateCrc(Datagram &datagram, uint8_t datagram_size)
 template <typename Datagram>
 void TMC2209::sendDatagramUnidirectional(Datagram &datagram, uint8_t datagram_size)
 {
+#ifdef HAL_UART_MODULE_ENABLED
+    if (huart_ == nullptr) return;
   uint8_t byte;
 
   for (uint8_t i = 0; i < datagram_size; ++i)
@@ -867,11 +949,16 @@ void TMC2209::sendDatagramUnidirectional(Datagram &datagram, uint8_t datagram_si
     byte = (datagram.bytes >> (i * BITS_PER_BYTE)) & BYTE_MAX_VALUE;
     serialWrite(byte);
   }
+#else
+    return;
+#endif
 }
 
 template <typename Datagram>
 void TMC2209::sendDatagramBidirectional(Datagram &datagram, uint8_t datagram_size)
 {
+#ifdef HAL_UART_MODULE_ENABLED
+    if (huart_ == nullptr) return;
   uint8_t byte;
 
   // Wait for transmission to complete
@@ -888,10 +975,15 @@ void TMC2209::sendDatagramBidirectional(Datagram &datagram, uint8_t datagram_siz
   // Wait for transmission to complete
   while (huart_->gState == HAL_UART_STATE_BUSY_TX)
     ;
+#else
+    return;
+#endif
 }
 
 void TMC2209::write(uint8_t register_address, uint32_t data)
 {
+#ifdef HAL_UART_MODULE_ENABLED
+  if (huart_ == nullptr) return;
   WriteReadReplyDatagram write_datagram;
   write_datagram.bytes = 0;
   write_datagram.sync = SYNC;
@@ -902,10 +994,15 @@ void TMC2209::write(uint8_t register_address, uint32_t data)
   write_datagram.crc = calculateCrc(write_datagram, WRITE_READ_REPLY_DATAGRAM_SIZE);
 
   sendDatagramUnidirectional(write_datagram, WRITE_READ_REPLY_DATAGRAM_SIZE);
+#else
+  return;
+#endif
 }
 
 uint32_t TMC2209::read(uint8_t register_address)
 {
+#ifdef HAL_UART_MODULE_ENABLED
+  if (huart_ == nullptr) return 0;
   ReadRequestDatagram read_request_datagram;
   read_request_datagram.bytes = 0;
   read_request_datagram.sync = SYNC;
@@ -950,8 +1047,9 @@ uint32_t TMC2209::read(uint8_t register_address)
 
     HAL_Delay(READ_RETRY_DELAY_MS);
   }
-
+#else
   return 0;
+#endif
 }
 
 uint8_t TMC2209::percentToCurrentSetting(uint8_t percent)

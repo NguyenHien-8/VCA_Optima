@@ -1,3 +1,7 @@
+// ========================== Nguyen Hien ==========================
+// Developer: TRAN NGUYEN HIEN
+// Email: trannguyenhien29085@gmail.com
+// =================================================================
 #ifndef TMC2209_HPP_
 #define TMC2209_HPP_
 
@@ -30,20 +34,25 @@ public:
   };
 
 // ===================== MANUAL STEP CONTROL ===================== //
-  // Initialize UART and GPIO
-  void setup(UART_HandleTypeDef *huart,
-               GPIO_TypeDef *en_gpio_port, uint16_t en_gpio_pin,
+  // 1. Setup Basic
+ void setup(GPIO_TypeDef *en_gpio_port, uint16_t en_gpio_pin,
                GPIO_TypeDef *dir_gpio_port, uint16_t dir_gpio_pin,
-               TIM_HandleTypeDef *step_timer, uint32_t step_channel,
-               GPIO_TypeDef *ms1_gpio_port, uint16_t ms1_gpio_pin,
-               GPIO_TypeDef *ms2_gpio_port, uint16_t ms2_gpio_pin,
-               SerialAddress serial_address = SERIAL_ADDRESS_0);
+               TIM_HandleTypeDef *step_timer, uint32_t step_channel);
+
+  // 2. Configuration UART
+#ifdef HAL_UART_MODULE_ENABLED
+  void configureUART(UART_HandleTypeDef *huart, SerialAddress serial_address = SERIAL_ADDRESS_0);
+#endif
+
+  // 3. Pin configuration Microstep (MS1/MS2)
+  void configureMicrostepPins(GPIO_TypeDef *ms1_gpio_port, uint16_t ms1_gpio_pin,
+                                GPIO_TypeDef *ms2_gpio_port, uint16_t ms2_gpio_pin);
 
   // Enable/Disable motor
   void setHardwareEnablePin(GPIO_TypeDef *gpio_port, uint16_t gpio_pin);
   void enable();
   void disable();
-  void setMicrostepGpio(uint16_t microsteps); // microstep (8, 16, 32, 64)
+  void setMicrostepGpio(uint16_t microsteps); // Microstep (8, 16, 32, 64)
 // =============================================================== //
 
   // Motor direction
@@ -98,14 +107,20 @@ public:
   void moveAtVelocity(int32_t microsteps_per_period);
   void moveUsingStepDirInterface();
 
-// ========== MANUAL STEP CONTROL ========== //
+// ============== MANUAL STEP CONTROL ============== //
   void setStepFrequency(uint32_t frequency_hz);
-  void setSpeedRPM(float rpm, uint16_t Microsteps, float Stepangle);
+  void setStepAngle(float angle);
+  void setSpeedRPM(float rpm, uint16_t Microsteps);
   void setStepPwmDutyCycle(uint8_t duty_percent);
   void startStepping();
   void stopStepping();
   void setDirection(Direction dir);
-// ========================================= //
+  void moveSteps(uint32_t steps, float rpm);
+  void moveDegrees(float degrees, float rpm);
+  void stopMove();
+  bool isMoving() const;
+  void handleTimerISR();
+// ================================================= //
 
   // Stall detection
   void setStallGuardThreshold(uint8_t stall_guard_threshold);
@@ -215,30 +230,31 @@ public:
   uint16_t getMicrostepCounter();
 
 private:
-  UART_HandleTypeDef *huart_;
+
+#ifdef HAL_UART_MODULE_ENABLED
+    UART_HandleTypeDef *huart_;
+#endif
     uint32_t serial_baud_rate_;
     uint8_t serial_address_;
 
-    // Các chân điều khiển GPIO
     GPIO_TypeDef *dir_gpio_port_;
     uint16_t dir_gpio_pin_;
 
     GPIO_TypeDef *en_gpio_port_;
     uint16_t en_gpio_pin_;
 
-    // Biến lưu chân Microstep
     GPIO_TypeDef *ms1_gpio_port_;
     uint16_t ms1_gpio_pin_;
     GPIO_TypeDef *ms2_gpio_port_;
     uint16_t ms2_gpio_pin_;
 
-    // Timer cho PWM
     TIM_HandleTypeDef *step_timer_;
     uint32_t step_channel_;
     uint32_t timer_period_;
 
-    // Các biến nội bộ trạng thái
+    // Variables Status
     bool initialized_;
+    float step_angle_;
 
   // Register unions and structures
   union GlobalConfig
@@ -438,9 +454,11 @@ private:
   bool serialOperationMode();
   void minimizeMotorCurrent();
 
+#ifdef HAL_UART_MODULE_ENABLED
   void serialWrite(uint8_t c);
   int serialRead();
   uint32_t serialAvailable();
+#endif
 
   uint32_t reverseData(uint32_t data);
   template <typename Datagram>
@@ -476,6 +494,11 @@ private:
   CoolConfig cool_config_;
   bool cool_step_enabled_;
   uint8_t toff_;
+
+  volatile uint32_t steps_target_;
+  volatile uint32_t steps_counter_;
+  volatile bool is_moving_interrupt_;
+  uint16_t current_microsteps_val_;   // Save value Microstep (8, 16, 32...)
 
   // Constants
   static const uint8_t BYTE_MAX_VALUE = 0xFF;
@@ -570,4 +593,4 @@ private:
   static const size_t MICROSTEPS_PER_STEP_MAX = 256;
 };
 
-#endif /* TMC2209_HPP_ */
+#endif

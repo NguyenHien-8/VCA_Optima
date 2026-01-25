@@ -19,7 +19,6 @@ extern TIM_HandleTypeDef htim3;
 
 /* ============= Global Variables ============= */
 TMC2209 stepper;
-
 /* ============= Interrupt Callback ============= */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
@@ -31,22 +30,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 void App_Setup(void)
 {
-
-// 1. Setup Basic
   stepper.setup(EN_PORT, EN_PIN,
 	            DIR_PORT, DIR_PIN,
 	            &htim3, TIM_CHANNEL_3);
 
-// Nếu không gọi hàm này, các lệnh setRunCurrent, read... sẽ tự động bị bỏ qua
-//  stepper.configureUART(&huart2, TMC2209::SERIAL_ADDRESS_0);
-
-// Nếu không gọi hàm này, setMicrostepGpio sẽ không tác động lên chân phần cứng
   stepper.configureMicrostepPins(MS1_PORT, MS1_PIN,
                                  MS2_PORT, MS2_PIN);
   stepper.enable();
-
-// Lưu ý: Nếu không dùng chân MS cứng (không gọi configureMicrostepPins),
-// hàm này chỉ set giá trị biến nội bộ để tính toán tốc độ, không set chân IO.
   stepper.setStepAngle(1.8);
   stepper.setMicrostepGpio(16);
 }
