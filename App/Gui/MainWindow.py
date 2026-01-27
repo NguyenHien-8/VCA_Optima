@@ -1,12 +1,10 @@
-# File: Ver1.1/App/Gui/MainWindow.py
 from PyQt6.QtWidgets import (QMainWindow, QLabel, QComboBox, 
                              QVBoxLayout, QWidget, QPushButton, QHBoxLayout)
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtGui import QImage, QPixmap
 
-# --- SỬA ĐỔI IMPORT ---
+from App.Gui.MenuBar import MenuBar
 from Vision.CameraManager import CameraManager
-# ----------------------
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -14,8 +12,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("TNH Optima")
         self.resize(800, 600)
         
+        # --- TÍCH HỢP MENU BAR ---
+        self.menu_bar = MenuBar(self) # Truyền self để MenuBar có thể gọi close() hoặc các hàm khác
+        self.setMenuBar(self.menu_bar)
+        # -------------------------
+
         self.camera_manager = CameraManager()
-        self.is_paused = False 
         
         self.setup_ui()
         self.connect_signals()

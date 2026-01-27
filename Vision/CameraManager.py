@@ -1,11 +1,8 @@
-# File: Ver1.1/Vision/CameraManager.py
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QImage
 
-# --- SỬA ĐỔI IMPORT ---
 from Vision.CameraThread import CameraThread
 from Vision.HardwareCameraScan import HardwareCameraScan
-# ----------------------
 
 class CameraManager(QObject):
     frame_received_signal = pyqtSignal(QImage)

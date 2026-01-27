@@ -1,4 +1,3 @@
-# File: Ver1.1/Vision/CameraThread.py
 import sys
 import cv2
 import time
@@ -29,8 +28,10 @@ class CameraThread(QThread):
         else:
             cap = cv2.VideoCapture(self.camera_index)
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        # -------------- ĐỘ PHÂN GIẢI --------------
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480) 
+        # ------------------------------------------
 
         if not cap.isOpened():
             self.error_signal.emit(f"Không thể mở Camera {self.camera_index}")

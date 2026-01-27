@@ -1,4 +1,3 @@
-# File: Ver1.1/Vision/HardwareCameraScan.py
 import sys
 import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
