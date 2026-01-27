@@ -1,0 +1,62 @@
+
+Ver1.1/
+│
+├── main.py                       
+│
+├── App/
+│   ├── __init__.py
+│   ├── Gui/                      # GIAO DIỆN
+│   │   ├── __init__.py
+│   │   ├── MainWindow.py        # Cửa sổ chính
+│   │   ├── MenuBar.py      
+│   │   ├── StatusBar.py 
+│   │   ├── ToolBar.py   
+│   │   ├── Widgets/
+│   │   │    ├── __init__.py
+│   │   │    ├── MenuBar/
+│   │   │    │    ├── __init__.py
+│   │   │    │    ├── MenuFile.py         
+│   │   │    │    ├── MenuSetup.py 
+│   │   │    │    ├── MenuControl.py   
+│   │   │    │    ├── MenuTool.py 
+│   │   │    │    ├── MenuCalibration.py
+│   │   │    │    └── MenuHelp.py 
+│   │   │    ├── StatusBar/
+│   │   │    ├── ToolBar/
+│   │
+│   ├── Styles/
+│   │   ├── MenuBarStyles.py 
+│   │   ├── StatusBarStyles.py
+│   │   ├── ToolBarStyles.py  
+│ 
+├── Controllers/              # ĐIỀU PHỐI GUI – LOGIC
+│   ├── __init__.py
+│   └── stm32_controller.py
+│   
+├── Vision/                   # XỬ LÝ ẢNH
+│   ├── __init__.py
+│   ├── CameraManager.py
+│   ├── CameraThread.py
+│   ├── HardwareCameraScan.py
+│
+├── Services/                 # LOGIC CẤP CAO
+│   ├── __init__.py
+│   ├── tracking_service.py
+│   ├── control_service.py
+│   └── data_logger.py
+│
+├── Utils/
+│   ├── __init__.py
+│   ├── logger.py
+│   ├── fps_counter.py
+│   └── time_utils.py
+├── Assets/
+│   ├── icons/
+│   ├── images/
+│   └── fonts/
+│
+├── Tests/
+│
+├── requirements.txt
+└── README.md
+
