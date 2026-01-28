@@ -5,11 +5,11 @@ Ver1.1/
 │
 ├── App/
 │   ├── __init__.py
-│   ├── Gui/                      # GIAO DIỆN
+│   ├── Gui/                     
 │   │   ├── __init__.py
-│   │   ├── MainWindow.py        # Cửa sổ chính
+│   │   ├── MainWindow.py       
 │   │   ├── MenuBar.py      
-│   │   ├── StatusBar.py 
+│   │   ├── StatusBar.py CameraDialog.py
 │   │   ├── ToolBar.py   
 │   │   ├── Widgets/
 │   │   │    ├── __init__.py
@@ -23,23 +23,26 @@ Ver1.1/
 │   │   │    │    └── MenuHelp.py 
 │   │   │    ├── StatusBar/
 │   │   │    ├── ToolBar/
+│   │   ├── Window/
+│   │   │    ├── __init__.py
+│   │   │    ├── CameraDialog.py
 │   │
 │   ├── Styles/
 │   │   ├── MenuBarStyles.py 
 │   │   ├── StatusBarStyles.py
 │   │   ├── ToolBarStyles.py  
 │ 
-├── Controllers/              # ĐIỀU PHỐI GUI – LOGIC
+├── Controllers/              
 │   ├── __init__.py
 │   └── stm32_controller.py
 │   
-├── Vision/                   # XỬ LÝ ẢNH
+├── Vision/                   
 │   ├── __init__.py
 │   ├── CameraManager.py
 │   ├── CameraThread.py
 │   ├── HardwareCameraScan.py
 │
-├── Services/                 # LOGIC CẤP CAO
+├── Services/                 
 │   ├── __init__.py
 │   ├── tracking_service.py
 │   ├── control_service.py

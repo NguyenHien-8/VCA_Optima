@@ -2,12 +2,12 @@ from PyQt6.QtWidgets import QMenu, QStyle
 from PyQt6.QtGui import QAction
 
 # Import Dialog mới
-from App.Gui.Widgets.CameraDialog import CameraDialog
+from App.Gui.Window.CameraDialog import CameraDialog
 
 class MenuSetup(QMenu):
     def __init__(self, parent_window):
         super().__init__("Setup", parent_window)
-        self.parent_window = parent_window # parent_window chính là MainWindow
+        self.parent_window = parent_window 
         self.setup_actions()
 
     def setup_actions(self):
@@ -27,10 +27,8 @@ class MenuSetup(QMenu):
         print("[Setup] Open Hardware Dialog (COM Port)")
 
     def on_camera(self):
-        # Tạo và hiển thị Dialog
-        # Truyền camera_manager từ MainWindow vào Dialog để nó điều khiển
+        # Truyền cả camera_manager và parent_window (self.parent_window)
         dialog = CameraDialog(self.parent_window.camera_manager, self.parent_window)
         
-        # Dùng dialog.exec() nếu muốn chặn thao tác Main khi đang mở setting
-        # Hoặc dialog.show() nếu muốn vừa mở setting vừa xem Main
+        # Dùng exec() để chặn cửa sổ chính (Modal Dialog)
         dialog.exec()
