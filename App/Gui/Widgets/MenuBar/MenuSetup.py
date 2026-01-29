@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import QMenu, QStyle
 from PyQt6.QtGui import QAction
 
 # Import Dialog mới
-from App.Gui.Window.CameraDialog import CameraDialog
+from App.Gui.Dialog.MenuBar.ConfigCameraDialog import ConfigCameraDialog
 
 class MenuSetup(QMenu):
     def __init__(self, parent_window):
@@ -28,7 +28,7 @@ class MenuSetup(QMenu):
 
     def on_camera(self):
         # Truyền cả camera_manager và parent_window (self.parent_window)
-        dialog = CameraDialog(self.parent_window.camera_manager, self.parent_window)
+        dialog = ConfigCameraDialog(self.parent_window.camera_manager, self.parent_window)
         
         # Dùng exec() để chặn cửa sổ chính (Modal Dialog)
         dialog.exec()

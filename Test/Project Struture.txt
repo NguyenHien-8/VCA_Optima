@@ -5,17 +5,21 @@ Ver1.1/
 │
 ├── App/
 │   ├── __init__.py
+│   ├── Core/ 
+│   │   ├── __init__.py 
+│   │   ├── ProjectManager.py
 │   ├── Gui/                     
-│   │   ├── __init__.py
+│   │   ├── __init__.py 
 │   │   ├── MainWindow.py       
 │   │   ├── MenuBar.py      
 │   │   ├── StatusBar.py CameraDialog.py
 │   │   ├── ToolBar.py   
 │   │   ├── Widgets/
-│   │   │    ├── __init__.py
+│   │   │    ├── __init__.py 
 │   │   │    ├── MenuBar/
 │   │   │    │    ├── __init__.py
-│   │   │    │    ├── MenuFile.py         
+│   │   │    │    ├── MenuFile.py      
+│   │   │    │    ├── ToggleSideBar.py    
 │   │   │    │    ├── MenuSetup.py 
 │   │   │    │    ├── MenuControl.py   
 │   │   │    │    ├── MenuTool.py 
@@ -23,14 +27,17 @@ Ver1.1/
 │   │   │    │    └── MenuHelp.py 
 │   │   │    ├── StatusBar/
 │   │   │    ├── ToolBar/
+│   │   ├── Dialog/
+│   │   │    ├── __init__.py 
+│   │   │    ├── MenuBar/
+│   │   │    │    ├── __init__.py
+│   │   │    │    ├── ConfigCameraDialog.py
 │   │   ├── Window/
 │   │   │    ├── __init__.py
-│   │   │    ├── CameraDialog.py
 │   │
 │   ├── Styles/
+│   │   ├── __init__.py
 │   │   ├── MenuBarStyles.py 
-│   │   ├── StatusBarStyles.py
-│   │   ├── ToolBarStyles.py  
 │ 
 ├── Controllers/              
 │   ├── __init__.py

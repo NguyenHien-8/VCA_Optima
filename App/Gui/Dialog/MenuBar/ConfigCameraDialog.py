@@ -4,12 +4,12 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import Qt, pyqtSlot, QSize, QRect
 from PyQt6.QtGui import QImage, QPixmap, QFont, QPainter, QPainterPath, QBrush, QColor
 
-class CameraDialog(QDialog):
+class ConfigCameraDialog(QDialog):
     def __init__(self, camera_manager, main_window):
         super().__init__(main_window)
         self.setWindowTitle("Camera Configuration")
         # Kích thước cố định toàn bộ Dialog
-        self.setFixedSize(500, 280) 
+        self.setFixedSize(425, 230) 
         
         self.camera_manager = camera_manager
         self.main_window = main_window 
@@ -19,13 +19,8 @@ class CameraDialog(QDialog):
         # 1. Lưu ID cũ để phòng trường hợp Cancel
         self.original_camera_id = self.camera_manager.active_camera_index
         self.selected_camera_id = self.original_camera_id
-        
-        # [FIX QUAN TRỌNG] Reset trạng thái "đang chạy" trong Manager về None.
-        # Lý do: Khi nhấn Apply lần trước, ta đã lưu ID vào active_camera_index nhưng lại Stop thread.
-        # Điều này khiến Manager lầm tưởng Camera vẫn đang chạy -> Từ chối lệnh Connect tiếp theo.
-        # Việc set về None ở đây ép Manager phải khởi tạo lại luồng mới khi bấm Connect.
+        # 2. Đặt active_camera_index về None để tránh chặn kết nối mới
         self.camera_manager.active_camera_index = None
-
         self.setup_ui()
         self.handle_signals_on_open()
         
@@ -34,21 +29,23 @@ class CameraDialog(QDialog):
 
     def setup_ui(self):
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(15, 15, 15, 8)
+        main_layout.setSpacing(5)
         self.setLayout(main_layout)
 
         # ================= PHẦN TRÊN =================
+        # Khung chính chứa 2 cột
         top_container = QHBoxLayout()
         
         # --- CỘT TRÁI ---
+        # Cột trái chứa combo box và nút Connect
         left_layout = QVBoxLayout()
         left_layout.setSpacing(10)
 
         # Title
         lbl_title = QLabel("Camera:")
         font_title = QFont()
-        font_title.setPointSize(14)
+        font_title.setPointSize(10)
         lbl_title.setFont(font_title)
         left_layout.addWidget(lbl_title)
 
@@ -75,7 +72,7 @@ class CameraDialog(QDialog):
         # Button Connect
         self.btn_connect = QPushButton("Connect")
         self.btn_connect.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_connect.setFixedHeight(35)
+        self.btn_connect.setFixedHeight(30)
         self.btn_connect.setStyleSheet("""
             QPushButton {
                 background-color: #f0f0f0; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;
@@ -91,11 +88,11 @@ class CameraDialog(QDialog):
         preview_container = QVBoxLayout()
         preview_container.setAlignment(Qt.AlignmentFlag.AlignCenter) 
 
-        self.lbl_preview = QLabel("Camera Thread")
+        self.lbl_preview = QLabel("Camera Previewer")
         self.lbl_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Kích thước CỐ ĐỊNH cho khung preview để không bị trượt/nhảy
-        self.lbl_preview.setFixedSize(260, 195) 
+        self.lbl_preview.setFixedSize(200, 162) 
         
         self.lbl_preview.setStyleSheet("""
             QLabel {
@@ -198,7 +195,7 @@ class CameraDialog(QDialog):
             return
             
         for idx in cam_indices:
-            self.combo_cameras.addItem(f"USB Camera (Index {idx})", idx)
+            self.combo_cameras.addItem(f"Camera (Index {idx})", idx)
         
         # Khôi phục lựa chọn từ self.original_camera_id hoặc self.selected_camera_id
         target_id = self.selected_camera_id if self.selected_camera_id is not None else self.original_camera_id
@@ -245,7 +242,7 @@ class CameraDialog(QDialog):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         path = QPainterPath()
-        path.addRoundedRect(0, 0, target_size.width(), target_size.height(), 15, 15)
+        path.addRoundedRect(0, 0, target_size.width(), target_size.height(), 15, 20)
 
         painter.setClipPath(path)
         painter.drawPixmap(0, 0, scaled_pixmap)

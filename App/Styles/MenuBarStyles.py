@@ -2,7 +2,7 @@
 MENU_BAR_STYLE = """
     /* --- THANH MENU CHÍNH (Top Bar) --- */
     QMenuBar {
-        background-color: #F0F0F0; /* Màu nền xám trắng nhẹ */
+        background-color: #FFFFFF; /* Màu nền xám trắng nhẹ */
         color: #000000;            /* Chữ màu đen */
         border-bottom: 1px solid #CCCCCC;
         padding: 2px;

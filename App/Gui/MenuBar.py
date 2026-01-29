@@ -4,12 +4,11 @@ from PyQt6.QtWidgets import QMenuBar
 from App.Styles.MenuBarStyles import MENU_BAR_STYLE
 
 # --- IMPORT MENU CON (MODULES) ---
-# Đảm bảo đường dẫn import đúng theo cấu trúc thư mục
 from App.Gui.Widgets.MenuBar.MenuFile import MenuFile
 from App.Gui.Widgets.MenuBar.MenuSetup import MenuSetup
 from App.Gui.Widgets.MenuBar.MenuControl import MenuControl
 from App.Gui.Widgets.MenuBar.MenuTool import MenuTool
-# from App.Gui.Widgets.MenuBar.MenuCalibration import MenuCalibration # (Tự tạo file này nếu cần)
+from App.Gui.Widgets.MenuBar.ToggleSideBar import ToggleAction
 
 class MenuBar(QMenuBar):
     def __init__(self, main_window):
@@ -26,8 +25,13 @@ class MenuBar(QMenuBar):
         self.setStyleSheet(MENU_BAR_STYLE)
 
     def setup_structure(self):
+        # --- [NEW] TOGGLE SIDEBAR ACTION ---
+        # Thêm Action icon vào vị trí đầu tiên
+        self.toggle_action = ToggleAction(self)
+        self.toggle_action.triggered.connect(self.main_window.toggle_sidebar)
+        self.addAction(self.toggle_action)
+
         # --- MENU 1: FILE ---
-        # Truyền self.main_window vào để các menu con có thể gọi hàm của cửa sổ chính (như close, show_error...)
         self.menu_file = MenuFile(self.main_window)
         self.addMenu(self.menu_file)
 
@@ -44,6 +48,5 @@ class MenuBar(QMenuBar):
         self.addMenu(self.menu_tool)
 
         # --- MENU 5: HELP ---
-        # Có thể tạo class riêng hoặc add nhanh tại đây nếu ít chức năng
         help_menu = self.addMenu("Help")
         help_menu.addAction("About", lambda: print("About TNH Optima"))
