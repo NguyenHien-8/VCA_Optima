@@ -59,17 +59,19 @@ class HardwareConfigBackend:
         return self.hardware_manager.scan_ports()
 
     def apply_connection(self, port_name, baud_rate, query_period):
-        new_config = {
-            "port": port_name,
-            "baud": baud_rate,
-            "query_period": query_period
-        }
-        self.hardware_manager.save_config(new_config)
-        
         try:
             period_int = int(query_period) if query_period else 100
-        except ValueError:
+            if period_int <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
             period_int = 100
+
+        new_config = {
+            "port": str(port_name).strip(),
+            "baud": int(baud_rate),
+            "query_period": period_int
+        }
+        self.hardware_manager.save_config(new_config)
         self.config_repo.save_hardware_config(port_name, baud_rate, period_int)
         
         if port_name:

@@ -4,26 +4,31 @@ from datetime import datetime
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QFileDialog, QSlider, QLabel, QSizePolicy, QMessageBox,
                              QComboBox)
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QUrl, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QUrl, QSize, QTimer
 # Đã thêm QPainter, QFont, QColor, QPen vào imports
 from PyQt6.QtGui import QIcon, QCloseEvent, QPixmap, QImage, QPainter, QFont, QColor, QPen
 from PyQt6.QtMultimedia import QMediaPlayer, QVideoFrame
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet, resource_path
+from App.Presentation.ViewModels.Workers import FunctionWorker
 
 
 class VideoEditor(QWidget):
     sig_open_video = pyqtSignal(str, str)  # project_name, file_path
+    media_created = pyqtSignal(str, str, str, str)
+    close_ready = pyqtSignal()
 
     def __init__(self, file_path=None, project_name=None, parent=None):
         super().__init__(parent)
         self.project_name = project_name
         self.file_path = file_path
-        self.media_player = QMediaPlayer()
-        self.video_widget = QVideoWidget()
+        self.media_player = QMediaPlayer(self)
+        self.video_widget = QVideoWidget(self)
         self.seeking = False
         self.current_frame = None  # Store the latest frame from video
+        self._workers = set()
+        self._close_when_idle = False
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setObjectName("VideoEditor")
@@ -298,18 +303,44 @@ class VideoEditor(QWidget):
 
         # --- END MODIFICATION ---
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"capture_{timestamp}.png"
         filepath = os.path.join(image_folder, filename)
 
-        try:
-            if pixmap.save(filepath, "PNG"):
-                # QMessageBox.information(self, "Success", f"Image saved: {filename}")
-                return
-            else:
-                QMessageBox.warning(self, "Save Failed", "Cannot save image file.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error saving image: {str(e)}")
+        image = pixmap.toImage()
+        worker = FunctionWorker(lambda: image.save(filepath, "PNG"))
+        self._workers.add(worker)
+        worker.result_ready.connect(
+            lambda success: self._on_capture_saved(filepath, success)
+        )
+        worker.error_occurred.connect(
+            lambda message: QMessageBox.critical(self, "Save Error", message)
+        )
+        worker.finished.connect(lambda: self._finish_worker(worker))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _on_capture_saved(self, filepath, success):
+        if not success:
+            QMessageBox.warning(self, "Save Failed", "Cannot save image file.")
+            return
+        item_name = os.path.basename(
+            os.path.dirname(os.path.dirname(filepath))
+        )
+        self.media_created.emit(
+            self.project_name or "",
+            item_name,
+            "Image",
+            filepath,
+        )
+
+    def _finish_worker(self, worker):
+        self._workers.discard(worker)
+        if self._close_when_idle and not any(
+            item.isRunning() for item in self._workers
+        ):
+            self._close_when_idle = False
+            QTimer.singleShot(0, self.close_ready.emit)
 
     @pyqtSlot()
     def skip_back(self):
@@ -378,9 +409,7 @@ class VideoEditor(QWidget):
     def stop_playback(self):
         """Stop video playback and release the file handle."""
         self.media_player.stop()
-        self.media_player.setSource(QUrl())  # Release the file
-        from PyQt6.QtCore import QCoreApplication
-        QCoreApplication.processEvents()  # Process related events immediately
+        self.media_player.setSource(QUrl())
 
     def reload_video(self, new_path):
         """Reload video from the new path after rename."""
@@ -389,5 +418,20 @@ class VideoEditor(QWidget):
         self.media_player.play()
 
     def closeEvent(self, event: QCloseEvent):
-        self.media_player.stop()
+        running_workers = [
+            worker for worker in self._workers if worker.isRunning()
+        ]
+        if running_workers:
+            self._close_when_idle = True
+            for worker in running_workers:
+                worker.requestInterruption()
+            event.ignore()
+            return
+        try:
+            self.video_sink.videoFrameChanged.disconnect(self.on_video_frame_probed)
+        except (TypeError, RuntimeError):
+            pass
+        self.stop_playback()
+        self.media_player.setVideoOutput(None)
+        self.current_frame = None
         super().closeEvent(event)

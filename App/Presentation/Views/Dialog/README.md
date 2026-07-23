@@ -2,26 +2,28 @@
 
 ## Project Overview
 
-Các QDialog cấu hình camera/hardware, điều khiển motor và xác nhận lưu/xóa tài nguyên.
+Các QDialog cấu hình camera/hardware, điều khiển motor và xác nhận save/delete.
 
 ## Annotated Directory Structure
 
-- `ConfigCameraDialog.py` — danh sách camera, preview bo góc, apply/cancel.
-- `ConfigHardwareDialog.py` — port, baud, query period và kết nối.
-- `MotorControlDialog.py` — nhập height/speed, up/down/stop.
-- `DeleteResourcesDialog.py` — tùy chọn chỉ bỏ workspace hoặc xóa đĩa.
+- `ConfigCameraDialog.py` — camera list, preview và apply/revert.
+- `ConfigHardwareDialog.py` — port scan, baud/query period và connect.
+- `MotorControlDialog.py` — up/down/stop command queue.
+- `DeleteResourcesDialog.py` — lựa chọn remove workspace hoặc delete disk.
 - `SaveResourcesDialog.py` — Save/Don't Save/Cancel.
 - `__init__.py` — package marker.
 
 ## Core Algorithms & Implementation
 
-- Camera preview chuyển `QImage` thành scaled `QPixmap`; Apply kết nối khi editor đang mở, Cancel khôi phục camera ban đầu.
-- Hardware dialog validate baud/port trước khi gọi backend.
-- Dialogs xác nhận không trực tiếp xóa file; chúng trả decision cho MainView.
+- Hardware port scan và connect chạy trong `FunctionWorker`; nút được khóa trong lúc thao tác.
+- Motor commands chạy tuần tự trong worker; Stop được đưa lên đầu queue.
+- Dialog từ chối đóng khi worker liên quan chưa hoàn tất để tránh QThread bị hủy sớm.
+- Camera preview dùng lifecycle bất đồng bộ của `CameraManager`.
+- Dialog xác nhận chỉ trả decision, không tự thực hiện thao tác phá hủy.
 
 ## Data Flow
 
-1. Menu/MainView mở dialog với manager/context.
-2. Dialog trao đổi với DialogViewModel.
-3. Kết quả accept/reject quay về MainView để commit hoặc hủy hành động.
-
+1. Menu/MainView lazy-import và mở dialog với manager phù hợp.
+2. Dialog validate input rồi giao tác vụ blocking cho worker.
+3. Worker result cập nhật UI trên main thread.
+4. Accept/reject trả quyền điều phối về MainView/ViewModel.

@@ -1,33 +1,70 @@
 # App/Presentation/ViewModels/FeatureViewModel/ImageEditorViewModel.py
 from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QImage, QPixmap
+from App.Presentation.ViewModels.Workers import FunctionWorker
 
 class ImageEditorViewModel(QObject):
     image_loaded = pyqtSignal(QPixmap)
     error_occurred = pyqtSignal(str)
+    workers_idle = pyqtSignal()
 
     def __init__(self, project_name=None, item_name=None):
         super().__init__()
         self.project_name = project_name
         self.item_name = item_name
         self.current_pixmap = None
+        self._workers = set()
 
     def load_image(self, file_path):
-        pixmap = QPixmap(file_path)
-        if pixmap.isNull():
+        if not isinstance(file_path, str) or not file_path:
+            self.error_occurred.emit("Invalid image path.")
+            return
+        self._start_worker(
+            lambda: QImage(file_path),
+            lambda image: self._on_image_decoded(file_path, image),
+        )
+
+    def _on_image_decoded(self, file_path, image):
+        if image.isNull():
             self.error_occurred.emit(f"Cannot load image: {file_path}")
-        else:
-            self.current_pixmap = pixmap
-            self.image_loaded.emit(pixmap)
+            return
+        self.current_pixmap = QPixmap.fromImage(image)
+        self.image_loaded.emit(self.current_pixmap)
 
     def save_image(self, file_path):
         """Save the current pixmap to the given file path."""
         if self.current_pixmap and not self.current_pixmap.isNull():
-            try:
-                success = self.current_pixmap.save(file_path)
+            image = self.current_pixmap.toImage()
+
+            def on_saved(success):
                 if not success:
                     self.error_occurred.emit(f"Failed to save image to {file_path}")
-            except Exception as e:
-                self.error_occurred.emit(f"Error saving image: {str(e)}")
+
+            self._start_worker(lambda: image.save(file_path), on_saved)
         else:
             self.error_occurred.emit("No image loaded to save.")
+
+    def _start_worker(self, function, callback):
+        worker = FunctionWorker(function)
+        self._workers.add(worker)
+        worker.result_ready.connect(callback)
+        worker.error_occurred.connect(self.error_occurred)
+        worker.finished.connect(lambda: self._finish_worker(worker))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _finish_worker(self, worker):
+        self._workers.discard(worker)
+        if not any(item.isRunning() for item in self._workers):
+            self.workers_idle.emit()
+
+    def close(self):
+        self.request_shutdown()
+
+    def request_shutdown(self):
+        for worker in list(self._workers):
+            if worker.isRunning():
+                worker.requestInterruption()
+
+    def has_running_workers(self):
+        return any(worker.isRunning() for worker in self._workers)

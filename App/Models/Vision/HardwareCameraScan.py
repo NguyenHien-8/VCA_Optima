@@ -1,16 +1,10 @@
 # App/Models/Vision/HardwareCameraScan.py
 import sys
-import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
-
-try:
-    from pygrabber.dshow_graph import FilterGraph
-    PYGRABBER_AVAILABLE = True
-except ImportError:
-    PYGRABBER_AVAILABLE = False
 
 class HardwareCameraScan(QThread):
     cameras_found_signal = pyqtSignal(list)
+    error_signal = pyqtSignal(str)
 
     def __init__(self, skip_index=None):
         super().__init__()
@@ -18,7 +12,7 @@ class HardwareCameraScan(QThread):
 
     def run(self):
         available_cameras = []
-        scan_success = False  
+        scan_success = False
         
         # --- Helper to check if the index already exists in the list dictionary ---
         def is_index_in_list(idx, camera_list):
@@ -27,13 +21,17 @@ class HardwareCameraScan(QThread):
                     return True
             return False
 
-        if sys.platform.startswith("win") and PYGRABBER_AVAILABLE:
+        if sys.platform.startswith("win"):
             try:
+                from pygrabber.dshow_graph import FilterGraph
+
                 graph = FilterGraph()
-                devices = graph.get_input_devices() 
+                devices = graph.get_input_devices()
                 
                 for i, device_name in enumerate(devices):
-                    cam_idx = i 
+                    if self.isInterruptionRequested():
+                        return
+                    cam_idx = i
                     
                     if self.skip_index is not None and cam_idx == self.skip_index:
                         if not is_index_in_list(cam_idx, available_cameras):
@@ -47,12 +45,21 @@ class HardwareCameraScan(QThread):
                 
                 scan_success = True 
 
-            except Exception as e:
-                print(f"Pygrabber error: {e}")
-                scan_success = False 
+            except (ImportError, OSError, RuntimeError) as exc:
+                self.error_signal.emit(f"DirectShow camera enumeration failed: {exc}")
 
         if not scan_success:
-            for i in range(5): 
+            try:
+                # OpenCV import and probing happen entirely on this worker thread.
+                import cv2
+            except Exception as exc:
+                self.error_signal.emit(f"OpenCV camera scan unavailable: {exc}")
+                self.cameras_found_signal.emit(available_cameras)
+                return
+
+            for i in range(5):
+                if self.isInterruptionRequested():
+                    return
                 if self.skip_index is not None and i == self.skip_index:
                     if not is_index_in_list(i, available_cameras):
                         available_cameras.append({"index": i, "name": f"Camera {i} (Active)"})
@@ -74,10 +81,11 @@ class HardwareCameraScan(QThread):
                             available_cameras.append({"index": i, "name": f"Camera {i}"})
                         else:
                             print(f"Warning: Camera {i} detected but busy/unreadable.")
-                except Exception:
-                    pass 
+                except Exception as exc:
+                    self.error_signal.emit(f"Camera {i} probe failed: {exc}")
                 finally:
                     if cap is not None:
                         cap.release()
 
-        self.cameras_found_signal.emit(available_cameras)
+        if not self.isInterruptionRequested():
+            self.cameras_found_signal.emit(available_cameras)

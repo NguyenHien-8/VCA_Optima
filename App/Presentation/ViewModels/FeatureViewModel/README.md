@@ -2,24 +2,27 @@
 
 ## Project Overview
 
-State và logic dành cho ba feature editor: ảnh, camera/media và phân tích giọt.
+State và logic dành cho ImageEditor, FileEditor camera/media và DropletAnalysis.
 
 ## Annotated Directory Structure
 
-- `ImageEditorViewModel.py` — load/save `QPixmap`.
-- `FileEditorViewModel.py` — nhận camera frame, motor command, capture/record và timer.
-- `DropletAnalysisViewModel.py` — chuyển pixmap sang grayscale NumPy, statistics và heatmap grid.
+- `ImageEditorViewModel.py` — decode/save ảnh bất đồng bộ và worker lifecycle.
+- `FileEditorViewModel.py` — camera frame, motor queue, capture/record, storage target và media notification.
+- `DropletAnalysisViewModel.py` — QImage→NumPy, normalization và statistics nền.
 - `__init__.py` — package marker.
 
 ## Core Algorithms & Implementation
 
-- Droplet image conversion dùng `QBuffer` PNG + PIL để tránh lỗi truy cập bộ nhớ QImage; chuẩn hóa intensity và tạo mesh 5×3 mm.
-- File editor chỉ đổi storage target khi không recording; target mới tạo `MediaManager` mới.
-- Recording timer là QTimer 1 giây; FPS ghi lấy từ camera, fallback 30.
+- Motor command được xếp hàng; emergency stop có độ ưu tiên cao.
+- Capture image và stop video chạy trong `FunctionWorker`.
+- `media_created(project, item, type, full_path)` chỉ phát sau khi file đã ghi thành công.
+- Storage target không được đổi khi đang record.
+- ViewModel theo dõi worker, phát `close_ready` khi mọi tác vụ đã kết thúc và tránh hủy QThread đang chạy.
 
 ## Data Flow
 
-1. View/editor gọi feature ViewModel.
-2. ViewModel chuyển đổi dữ liệu hoặc gọi Media/Control managers.
-3. Signals frame/state/error/analysis trả lại widget.
-
+1. `FileEditor` phát capture/record/motor event.
+2. `FileEditorViewModel` gọi manager trong worker.
+3. Media thành công → `media_created` → `ProjectSidebar.notify_media_created`.
+4. Image/Droplet worker trả dữ liệu đã xử lý → View render bằng Qt/Matplotlib.
+5. Close request → cooperative interruption/stop → `close_ready`.

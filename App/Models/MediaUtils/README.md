@@ -2,25 +2,26 @@
 
 ## Project Overview
 
-Dịch vụ thu media theo Item: chụp frame camera thành PNG và ghi stream thành MP4 mà không khóa giao diện.
+Dịch vụ media theo Item: lưu frame camera thành PNG và ghi stream thành MP4 mà không khóa UI.
 
 ## Annotated Directory Structure
 
-- `MediaManager.py` — facade image/video.
-- `ImageCaptureManager.py` — tạo `Image/`, đặt tên timestamp và lưu `QImage` PNG.
-- `VideoRecorderManager.py` — state machine và worker thread ghi `Video/video_*.mp4`.
+- `MediaManager.py` — facade thống nhất image/video.
+- `ImageCaptureManager.py` — tạo `Image/` và lưu `QImage` lossless.
+- `VideoRecorderManager.py` — state machine và recorder thread cho `Video/`.
 - `__init__.py` — package marker.
 
 ## Core Algorithms & Implementation
 
-- Video state machine có `IDLE`, `RECORDING`, `PAUSED`.
-- `VideoRecorderThread` dùng `deque(maxlen=5)` có mutex/condition; khi backlog, chỉ giữ frame mới nhất.
-- Frame `QImage` được copy, đổi RGB→BGR và khởi tạo `cv2.VideoWriter` theo kích thước frame đầu.
-- Tên file dùng timestamp giây; ảnh PNG lossless, video codec MP4V.
+- File dùng timestamp đến microsecond để tránh ghi đè khi capture liên tiếp.
+- Video state machine gồm `IDLE`, `RECORDING`, `PAUSED`.
+- `VideoRecorderThread` dùng `deque(maxlen=5)`, mutex và wait condition; frame cũ bị bỏ khi encoder chậm.
+- OpenCV/NumPy được import trong recorder thread; `VideoWriter` luôn release trong `finally`.
+- Đóng editor chỉ request stop recorder; wrapper thread được giữ sống đến `finished`.
 
 ## Data Flow
 
-1. `FileEditorViewModel` nhận frame từ dispatcher.
-2. Capture gọi `QImage.save()` vào `Item/Image`.
-3. Record đẩy frame vào queue → worker đổi định dạng/ghi `Item/Video` → sidebar watcher tự refresh.
-
+1. Camera dispatcher gửi `QImage` đến `FileEditorViewModel`.
+2. Capture chạy `QImage.save()` trong worker → trả filename → phát `media_created(Image)`.
+3. Record copy frame vào queue → recorder ghi MP4 → Stop chạy trong worker và release writer.
+4. Stop thành công trả filename → phát `media_created(Video)` → SideBar hiển thị file ngay.

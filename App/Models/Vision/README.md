@@ -2,26 +2,27 @@
 
 ## Project Overview
 
-Pipeline camera đa luồng: khám phá thiết bị, đọc frame, xử lý mất kết nối và chuyển frame đến đúng editor.
+Quản lý camera vật lý, scan thiết bị và định tuyến frame đến feature đang hoạt động.
 
 ## Annotated Directory Structure
 
-- `HardwareCameraScan.py` — QThread quét camera bằng pygrabber/DirectShow hoặc OpenCV fallback.
-- `CameraThread.py` — QThread sở hữu `VideoCapture`, pause/stop bằng mutex và wait condition.
-- `CameraManager.py` — lifecycle, resolution guard, retry, preview/live routing và reference count.
-- `CameraFrameDispatcher.py` — giữ last frame và forward đến active ViewModel.
+- `CameraManager.py` — state machine camera, reference count, retry timer và lifecycle.
+- `CameraThread.py` — mở/capture/release OpenCV camera ngoài UI thread.
+- `HardwareCameraScan.py` — scan tên/index camera trong worker.
+- `CameraFrameDispatcher.py` — chuyển frame đến ViewModel hợp lệ.
 - `__init__.py` — package marker.
 
 ## Core Algorithms & Implementation
 
-- Windows ưu tiên friendly names từ pygrabber; fallback probe index 0..4 và xác nhận bằng một frame đọc được.
-- Resolution bị giới hạn 480×360 đến 960×576; mặc định 640×480.
-- Mất frame phát error; manager thử lại sau 1 giây, tối đa năm lần.
-- Reference count chỉ duy trì camera khi có editor sử dụng; dispatcher gửi last frame ngay khi chuyển active editor.
+- Camera không scan hoặc kết nối trong constructor; I/O chỉ bắt đầu sau first paint hoặc khi feature acquire.
+- Chuyển camera dùng pending target và tín hiệu `finished`, không gọi wait trên luồng UI.
+- Retry dùng single-shot `QTimer` có thể hủy.
+- Thread kiểm tra interruption, giải phóng `VideoCapture` trong `finally` và chỉ import OpenCV trong `run()`.
+- Dispatcher kiểm tra callable `receive_frame`; target lỗi sẽ bị vô hiệu hóa an toàn.
 
 ## Data Flow
 
-1. Scanner → danh sách `{index,name}` → dialog/status.
-2. `CameraThread` → BGR frame → RGB `QImage.copy()` → `CameraManager`.
-3. Manager phát preview hoặc live signal → dispatcher → active `FileEditorViewModel`.
-
+1. Config/feature yêu cầu scan, preview hoặc acquire camera.
+2. `CameraManager` tạo worker và nhận `QImage` qua queued signal.
+3. `CameraFrameDispatcher` chuyển frame đến `FileEditorViewModel`.
+4. ViewModel phát preview, capture frame hoặc đưa frame vào video recorder.

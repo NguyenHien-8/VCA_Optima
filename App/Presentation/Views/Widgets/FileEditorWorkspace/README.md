@@ -2,26 +2,29 @@
 
 ## Project Overview
 
-Các editor và control widget cho camera live, ảnh tĩnh và video đã lưu.
+Các editor và control widget cho camera live, ảnh tĩnh, video đã lưu và điều khiển motor.
 
 ## Annotated Directory Structure
 
-- `FileEditor.py` — ghép camera preview với motor/media controls.
-- `MotorControlEditor.py` — nhập height/speed và phát lệnh.
-- `MediaControlEditor.py` — capture/record/pause/resume/stop UI state.
-- `ImageEditor.py` — hiển thị Matplotlib, zoom/pan, save và mở droplet analysis.
-- `VideoEditor.py` — QMediaPlayer, timeline, tốc độ, skip và capture frame.
+- `FileEditor.py` — camera preview cùng motor/media controls.
+- `MotorControlEditor.py` — nhập height/speed và phát command.
+- `MediaControlEditor.py` — capture/record/pause/resume/stop state.
+- `ImageEditor.py` — Matplotlib image view, zoom/pan, save và droplet analysis.
+- `VideoEditor.py` — QMediaPlayer, timeline, playback rate và capture frame.
 
 ## Core Algorithms & Implementation
 
-- Image editor ánh xạ mọi ảnh vào extent vật lý 5×3 mm và clamp zoom trong miền đó.
-- Video editor dùng `QVideoSink` lấy frame hiện tại; capture ghi PNG vào sibling `Image/` và đóng dấu thời gian phát.
-- File editor truyền signal control cho ViewModel; không tự ghi serial/media.
-- Đóng image editor sẽ đóng các cửa sổ phân tích con; đóng video giải phóng media source.
+- FileEditor chỉ phát UI event; `FileEditorViewModel` sở hữu media/control workflow.
+- ImageEditor và VideoEditor theo dõi worker save/decode; close được hoãn đến `finished`.
+- ImageEditor ngắt Matplotlib callbacks, clear figure và đóng analysis windows con.
+- VideoEditor disconnect video sink, bỏ media source và clear frame khi đóng.
+- Capture từ live camera hoặc VideoEditor đều phát explicit media notification; file tạo từ nguồn ngoài vẫn do watcher đồng bộ.
 
 ## Data Flow
 
-1. Camera dispatcher → `FileEditorViewModel` → `FileEditor` preview/control.
-2. Image/Video file từ sidebar → editor tương ứng.
-3. Image editor → `DropletAnalysisWindow`; video capture → `Item/Image` → sidebar watcher.
-
+1. Camera dispatcher → `FileEditorViewModel` → `FileEditor` preview.
+2. Capture → background PNG save → `media_created(Image)` → SideBar.
+3. Record frames → recorder queue → MP4 finalize → `media_created(Video)` → SideBar.
+4. VideoEditor capture frame → background PNG save → `media_created(Image)` → SideBar.
+5. Sidebar image/video file → MainView → ImageEditor/VideoEditor.
+6. ImageEditor → DropletAnalysisWindow → analysis worker → rendered result.

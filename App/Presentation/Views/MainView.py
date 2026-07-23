@@ -13,11 +13,6 @@ from App.Presentation.Views.Widgets.StatusBar import StatusBar
 from App.Presentation.Views.Widgets.EditorWorkspace import EditorWorkspace
 from App.Presentation.Views.Dialog.DeleteResourcesDialog import DeleteResourcesDialog
 from App.Presentation.Views.Dialog.SaveResourcesDialog import SaveResourcesDialog
-from App.Presentation.Views.Widgets.FileEditorWorkspace.FileEditor import FileEditor
-from App.Presentation.ViewModels.FeatureViewModel.FileEditorViewModel import FileEditorViewModel
-from App.Presentation.Views.Widgets.FileEditorWorkspace.ImageEditor import ImageEditor
-from App.Presentation.ViewModels.FeatureViewModel.ImageEditorViewModel import ImageEditorViewModel
-from App.Presentation.Views.Widgets.FileEditorWorkspace.VideoEditor import VideoEditor
 
 
 class FileEditorWindow(QMainWindow):
@@ -31,6 +26,7 @@ class FileEditorWindow(QMainWindow):
         self.editor_widget = editor_widget
         self.view_model = view_model
         self._opened = False
+        self._close_pending = False
 
         self.setWindowTitle("FileEditor")
         self.resize(1100, 720)
@@ -40,6 +36,8 @@ class FileEditorWindow(QMainWindow):
 
         if hasattr(self.view_model, "storage_target_changed"):
             self.view_model.storage_target_changed.connect(self._on_storage_target_changed)
+        if hasattr(self.view_model, "close_ready"):
+            self.view_model.close_ready.connect(self._on_close_ready)
 
     def _apply_window_title(self):
         project_name = getattr(self.view_model, "project_name", "")
@@ -64,6 +62,15 @@ class FileEditorWindow(QMainWindow):
 
     def closeEvent(self, event):
         try:
+            if (
+                hasattr(self.view_model, "request_close")
+                and not self.view_model.request_close()
+            ):
+                self._close_pending = True
+                event.ignore()
+                return
+
+            self._close_pending = False
             active_vm = self.main_view.camera_dispatcher._active_view_model
             if active_vm is self.view_model:
                 self.main_view.camera_dispatcher.set_active_view_model(None)
@@ -78,9 +85,18 @@ class FileEditorWindow(QMainWindow):
 
             self.main_view.file_editor_window = None
             event.accept()
+            if self.main_view._close_after_file_editor:
+                self.main_view._close_after_file_editor = False
+                QTimer.singleShot(0, self.main_view.close)
         except Exception as e:
             QMessageBox.warning(self, "Close Error", str(e))
+            self.main_view.file_editor_window = None
             event.accept()
+
+    @pyqtSlot()
+    def _on_close_ready(self):
+        if self._close_pending:
+            QTimer.singleShot(0, self.close)
 
 
 class MainView(QMainWindow):
@@ -91,6 +107,7 @@ class MainView(QMainWindow):
 
         self.view_model = view_model or MainViewModel()
         self.camera_dispatcher = self.view_model.get_camera_dispatcher()
+        self._close_after_file_editor = False
 
         self.sidebar = ProjectSidebar(self)
         self.sidebar.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable |
@@ -111,6 +128,9 @@ class MainView(QMainWindow):
 
         self.tab_view_models = {}
         self.file_editor_window = None
+        self._pending_text_loads = {}
+        self._pending_tab_closes = set()
+        self._close_after_tabs = False
 
         self.setup_ui()
         self.editor_workspace.tab_widget.currentChanged.connect(self.on_tab_changed)
@@ -126,14 +146,12 @@ class MainView(QMainWindow):
 
         self.view_model.restore_session()
 
-        expanded_paths = self.view_model.get_expanded_paths()
-        self.sidebar.restore_expanded_paths(expanded_paths)
-
         tab_bar = self.editor_workspace.tab_widget.tabBar()
         tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         tab_bar.customContextMenuRequested.connect(self.on_tab_context_menu)
 
         self.sidebar.project_tree.itemSelectionChanged.connect(self._on_sidebar_selection_changed)
+        QTimer.singleShot(0, self.view_model.start_deferred_initialization)
 
     def _connect_view_model_signals(self):
         self.view_model.status_message.connect(self.system_status_bar.showMessage)
@@ -160,6 +178,7 @@ class MainView(QMainWindow):
 
         self.view_model.request_stop_video_editor.connect(self._stop_video_editor)
         self.view_model.request_close_editor_for_file.connect(self._close_editor_by_path)
+        self.view_model.session_restored.connect(self.sidebar.restore_expanded_paths)
 
     @pyqtSlot(str, str)
     def _close_editors_for_target(self, project_name, item_name):
@@ -184,9 +203,13 @@ class MainView(QMainWindow):
         tab_widget = self.editor_workspace.tab_widget
         for i in range(tab_widget.count()):
             widget = tab_widget.widget(i)
-            if isinstance(widget, VideoEditor) and widget.property("full_path") == full_path:
+            if self._is_video_editor(widget) and widget.property("full_path") == full_path:
                 widget.stop_playback()
                 break
+
+    @staticmethod
+    def _is_video_editor(widget):
+        return widget is not None and widget.property("editor_kind") == "video"
 
     @pyqtSlot(str)
     def _close_editor_by_path(self, full_path):
@@ -277,6 +300,9 @@ class MainView(QMainWindow):
             self.create_calibration_tab_from(widget)
 
     def create_calibration_tab_from(self, source_widget):
+        from App.Presentation.ViewModels.FeatureViewModel.ImageEditorViewModel import ImageEditorViewModel
+        from App.Presentation.Views.Widgets.FileEditorWorkspace.ImageEditor import ImageEditor
+
         project_name = source_widget.property("project_name")
         if not project_name:
             project_name = "Unknown"
@@ -447,18 +473,24 @@ class MainView(QMainWindow):
         video_exts = ['.mp4', '.avi', '.mov', '.mkv', '.flv']
 
         if ext in video_exts:
+            from App.Presentation.Views.Widgets.FileEditorWorkspace.VideoEditor import VideoEditor
+
             editor = VideoEditor(full_path, project_name=project_name)
+            editor.setProperty("editor_kind", "video")
             editor.setProperty("project_name", project_name)
             editor.setProperty("file_name", os.path.basename(full_path))
             editor.setProperty("full_path", full_path)
             editor.sig_open_video.connect(self.action_open_file_in_editor)
+            editor.media_created.connect(self.sidebar.notify_media_created)
             self.editor_workspace.add_editor_tab(editor, os.path.basename(full_path), project_name, full_path)
-            self.view_model.on_editor_opened()
             if self.restoring_in_progress:
                 self._process_next_pending_editor()
             return
 
         if ext in image_exts:
+            from App.Presentation.ViewModels.FeatureViewModel.ImageEditorViewModel import ImageEditorViewModel
+            from App.Presentation.Views.Widgets.FileEditorWorkspace.ImageEditor import ImageEditor
+
             view_model = ImageEditorViewModel(project_name=project_name, item_name=os.path.basename(relative_path))
             editor = ImageEditor(view_model)
             editor.setProperty("project_name", project_name)
@@ -467,7 +499,6 @@ class MainView(QMainWindow):
             editor.sig_open_video.connect(self.action_open_file_in_editor)
             view_model.load_image(full_path)
             self.editor_workspace.add_editor_tab(editor, os.path.basename(full_path), project_name, full_path)
-            self.view_model.on_editor_opened()
             if self.restoring_in_progress:
                 self._process_next_pending_editor()
             return
@@ -540,6 +571,9 @@ class MainView(QMainWindow):
 
         session_path = self._build_file_editor_session_path(item_path, item_name)
 
+        from App.Presentation.ViewModels.FeatureViewModel.FileEditorViewModel import FileEditorViewModel
+        from App.Presentation.Views.Widgets.FileEditorWorkspace.FileEditor import FileEditor
+
         view_model = FileEditorViewModel(
             project_name=project_name,
             file_name=f"{item_name}.session",
@@ -548,6 +582,7 @@ class MainView(QMainWindow):
             camera_manager=self.view_model.camera_manager,
             control_panel_manager=self.view_model.control_panel_manager
         )
+        view_model.media_created.connect(self.sidebar.notify_media_created)
 
         editor_widget = FileEditor(view_model)
         editor_widget.setProperty("full_path", session_path)
@@ -572,16 +607,40 @@ class MainView(QMainWindow):
             return
 
         editor_widget = QTextEdit()
-        editor_widget.setPlainText(content)
-        editor_widget.setReadOnly(False)
+        editor_widget.setReadOnly(True)
         editor_widget.setObjectName("CodeEditor")
         editor_widget.setProperty("full_path", full_path)
         editor_widget.setProperty("file_name", file_name)
         editor_widget.setProperty("project_name", project_name)
 
         self.editor_workspace.add_editor_tab(editor_widget, file_name, project_name, full_path)
-        self.view_model.on_editor_opened()
+        self._pending_text_loads[editor_widget] = {
+            "content": content,
+            "offset": 0,
+        }
+        self._append_text_chunk(editor_widget)
 
+    def _append_text_chunk(self, editor_widget):
+        state = self._pending_text_loads.get(editor_widget)
+        if state is None:
+            return
+        content = state["content"]
+        start = state["offset"]
+        end = min(start + 64 * 1024, len(content))
+        try:
+            editor_widget.insertPlainText(content[start:end])
+        except RuntimeError:
+            self._pending_text_loads.pop(editor_widget, None)
+            return
+
+        if end < len(content):
+            state["offset"] = end
+            QTimer.singleShot(0, lambda: self._append_text_chunk(editor_widget))
+            return
+
+        editor_widget.setReadOnly(False)
+        editor_widget.document().setModified(False)
+        self._pending_text_loads.pop(editor_widget, None)
         if self.restoring_in_progress:
             self._process_next_pending_editor()
 
@@ -616,16 +675,31 @@ class MainView(QMainWindow):
                         vm.file_name = new_name
                 break
 
-        if found_widget and isinstance(found_widget, VideoEditor):
+        if found_widget and self._is_video_editor(found_widget):
             found_widget.reload_video(new_full_path)
 
     def on_tab_changed(self, index):
         if index >= 0:
             widget = self.editor_workspace.tab_widget.widget(index)
             active_vm = self.tab_view_models.get(widget)
-            QTimer.singleShot(0, lambda: self.camera_dispatcher.set_active_view_model(active_vm))
         else:
-            self.camera_dispatcher.set_active_view_model(None)
+            active_vm = None
+
+        if active_vm is None or not callable(
+            getattr(active_vm, "receive_frame", None)
+        ):
+            editor_window = self.file_editor_window
+            active_vm = (
+                editor_window.view_model
+                if editor_window is not None and editor_window.isVisible()
+                else None
+            )
+        QTimer.singleShot(
+            0,
+            lambda target=active_vm: self.camera_dispatcher.set_active_view_model(
+                target
+            ),
+        )
 
     def on_tab_close_requested(self, index):
         widget = self.editor_workspace.tab_widget.widget(index)
@@ -637,14 +711,18 @@ class MainView(QMainWindow):
 
     def _close_tab_safely(self, index) -> bool:
         widget = self.editor_workspace.tab_widget.widget(index)
+        was_loading = widget in self._pending_text_loads
+        self._pending_text_loads.pop(widget, None)
         file_name = widget.property("file_name") if hasattr(widget, "property") else None
 
-        if isinstance(widget, VideoEditor):
+        if self._is_video_editor(widget):
             widget.stop_playback()
-            from PyQt6.QtCore import QCoreApplication
-            QCoreApplication.processEvents()
 
-        if isinstance(widget, QTextEdit) and widget.document().isModified():
+        if (
+            isinstance(widget, QTextEdit)
+            and not was_loading
+            and widget.document().isModified()
+        ):
             reply = QMessageBox.question(
                 self,
                 "Unsaved Changes",
@@ -659,13 +737,36 @@ class MainView(QMainWindow):
                 full_path = widget.property("full_path")
                 self.view_model.handle_save_file_content(content, project_name, file_name, full_path)
 
-        if widget in self.tab_view_models:
-            self.tab_view_models[widget].close()
-            del self.tab_view_models[widget]
-
-        self.view_model.on_editor_closed()
-        self.editor_workspace.close_tab(index)
+        tab_view_model = self.tab_view_models.get(widget)
+        if not self.editor_workspace.close_tab(index):
+            self._schedule_tab_close_when_ready(widget)
+            return False
+        if tab_view_model is not None:
+            tab_view_model.close()
+            self.tab_view_models.pop(widget, None)
+        if was_loading and self.restoring_in_progress:
+            QTimer.singleShot(0, self._process_next_pending_editor)
         return True
+
+    def _schedule_tab_close_when_ready(self, widget):
+        if widget in self._pending_tab_closes:
+            return
+        close_ready = getattr(widget, "close_ready", None)
+        if close_ready is None:
+            return
+        self._pending_tab_closes.add(widget)
+        close_ready.connect(
+            lambda current=widget: self._retry_pending_tab_close(current)
+        )
+
+    def _retry_pending_tab_close(self, widget):
+        self._pending_tab_closes.discard(widget)
+        index = self.editor_workspace.tab_widget.indexOf(widget)
+        if index >= 0:
+            self._close_tab_safely(index)
+        if self._close_after_tabs:
+            self._close_after_tabs = False
+            QTimer.singleShot(0, self.close)
 
     def _close_all_tabs_safely(self) -> bool:
         for i in range(self.editor_workspace.tab_widget.count() - 1, -1, -1):
@@ -674,6 +775,21 @@ class MainView(QMainWindow):
         return True
 
     def closeEvent(self, event: QCloseEvent):
+        if not self.view_model.shutdown_workers():
+            self.system_status_bar.showMessage(
+                "A background file operation is still running. Please wait before closing.",
+                5000,
+            )
+            event.ignore()
+            return
+        if not self.sidebar.shutdown():
+            self.system_status_bar.showMessage(
+                "Media folders are still being scanned. Please try closing again.",
+                3000,
+            )
+            event.ignore()
+            return
+
         editor_list = []
         tab_widget = self.editor_workspace.tab_widget
         for i in range(tab_widget.count()):
@@ -687,13 +803,37 @@ class MainView(QMainWindow):
 
         if self.file_editor_window is not None:
             self.file_editor_window.close()
+            if self.file_editor_window is not None:
+                self._close_after_file_editor = True
+                self.system_status_bar.showMessage(
+                    "Finishing editor operations before closing.", 5000
+                )
+                event.ignore()
+                return
 
         if not self._close_all_tabs_safely():
+            self._close_after_tabs = True
+            self.system_status_bar.showMessage(
+                "Finishing editor operations before closing.", 5000
+            )
+            event.ignore()
+            return
+        if not self.view_model.shutdown_workers():
+            self.system_status_bar.showMessage(
+                "Finishing file saves before closing. Please try again shortly.",
+                5000,
+            )
             event.ignore()
             return
 
-        self.view_model.shutdown_workers()
-        self.view_model.camera_manager.cleanup()
+        if not self.view_model.camera_manager.cleanup():
+            self.system_status_bar.showMessage(
+                "Camera shutdown is still in progress. Please try closing again.",
+                5000,
+            )
+            event.ignore()
+            return
+        self.view_model.hardware_manager.cleanup()
         self.view_model.save_session_with_editors(editor_list, expanded_paths)
 
         event.accept()

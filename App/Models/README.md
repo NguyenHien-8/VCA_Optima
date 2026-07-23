@@ -2,29 +2,29 @@
 
 ## Project Overview
 
-Lớp nghiệp vụ trung tâm: quản lý cây project, session, camera, media, phần cứng và phân tích góc tiếp xúc.
+Tầng nghiệp vụ quản lý project/session, camera, phần cứng serial, media và phân tích hình học. Models không thao tác widget trực tiếp.
 
 ## Annotated Directory Structure
 
-- `Analysis/` — baseline, ellipse/circle fit và contact-angle geometry.
-- `Controllers/` — serial connector/manager.
-- `MediaUtils/` — chụp ảnh và ghi video.
-- `Vision/` — camera scanning, capture thread và frame routing.
-- `ProjectManager.py` — lifecycle Project/Item/media file.
-- `SessionManager.py` — state cache và persistence orchestration.
+- `Analysis/` — baseline, contour, circle/ellipse fit và contact-angle geometry.
+- `Controllers/` — serial connector và hardware facade.
+- `MediaUtils/` — capture PNG và record MP4.
+- `Vision/` — scan camera, capture thread, lifecycle và frame dispatcher.
+- `ProjectManager.py` — CRUD Project/Item/media với kiểm tra đường dẫn.
+- `SessionManager.py` — snapshot và restore trạng thái phiên.
 - `CamHardwareManager.py` — backend cấu hình camera/hardware.
-- `ControlPanelManager.py` — chuẩn hóa lệnh motor.
-- `__init__.py` — package marker.
+- `ControlPanelManager.py` — validate và đóng gói lệnh motor.
 
 ## Core Algorithms & Implementation
 
-- Project có marker `config.json`; Item hợp lệ phải có cả `Image/` và `Video/`.
-- Camera và serial được bọc sau manager để ViewModel không thao tác API thiết bị trực tiếp.
-- Các thuật toán số trả dictionary/tuple thuần để dễ hiển thị và kiểm thử.
+- Project hợp lệ có marker `config.json`; Item hợp lệ có `Image/` và `Video/`.
+- Các thao tác filesystem được serialize bằng khóa model và chạy trong worker.
+- Camera/serial/media sử dụng owner duy nhất, timeout hữu hạn và cooperative cancellation.
+- Tên/path được chuẩn hóa, kiểm tra containment và chống `..`/ký tự không hợp lệ.
 
 ## Data Flow
 
-1. ViewModel nhận yêu cầu từ UI.
-2. Model kiểm tra trạng thái và thực hiện filesystem/thiết bị/phân tích.
-3. Kết quả trả trực tiếp hoặc phát signal về ViewModel/View.
-
+1. ViewModel gửi yêu cầu đã validate vào Model.
+2. Model thao tác filesystem, thiết bị hoặc thuật toán trong worker phù hợp.
+3. Kết quả tuple/object thuần được trả về ViewModel.
+4. ViewModel phát signal trạng thái, lỗi hoặc thay đổi tài nguyên cho View.

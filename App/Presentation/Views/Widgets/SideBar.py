@@ -2,9 +2,10 @@ import os
 from PyQt6.QtWidgets import (QDockWidget, QTabWidget, QWidget, QVBoxLayout,
                              QTreeWidget, QTreeWidgetItem, QMenu, QAbstractItemView, QStyle)
 from PyQt6.QtGui import QDrag, QIcon
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QMimeData, QFileSystemWatcher, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QMimeData, QFileSystemWatcher, QSize, QTimer
 
 from App.Infrastructure.Helpers.ResourceHelper import resource_path
+from App.Presentation.ViewModels.Workers import FunctionWorker
 
 
 class DraggableTreeWidget(QTreeWidget):
@@ -62,6 +63,8 @@ class DraggableTreeWidget(QTreeWidget):
 
 
 class ProjectSidebar(QDockWidget):
+    MEDIA_LOADED_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+
     sig_new_item = pyqtSignal(str)
     sig_delete = pyqtSignal(str)
     sig_rename = pyqtSignal(str)
@@ -99,6 +102,8 @@ class ProjectSidebar(QDockWidget):
         self.fs_watcher = QFileSystemWatcher(self)
         self.fs_watcher.directoryChanged.connect(self.on_directory_changed)
         self.watched_paths = {}
+        self._media_scan_workers = {}
+        self._pending_media_refreshes = set()
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -191,6 +196,7 @@ class ProjectSidebar(QDockWidget):
         self.project_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.project_tree.customContextMenuRequested.connect(self.show_context_menu)
         self.project_tree.itemDoubleClicked.connect(self.on_item_double_clicked)
+        self.project_tree.itemExpanded.connect(self._on_item_expanded)
 
         layout.addWidget(self.project_tree)
 
@@ -368,15 +374,38 @@ class ProjectSidebar(QDockWidget):
                 image_node = QTreeWidgetItem(folder_item)
                 image_node.setText(0, "Image")
                 image_node.setIcon(0, self.icon_dir)
+                image_node.setData(0, self.MEDIA_LOADED_ROLE, False)
+                image_node.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+                )
 
                 video_node = QTreeWidgetItem(folder_item)
                 video_node.setText(0, "Video")
                 video_node.setIcon(0, self.icon_dir)
+                video_node.setData(0, self.MEDIA_LOADED_ROLE, False)
+                video_node.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator
+                )
 
-                self._populate_media_files(folder_item, item_path)
                 self._watch_item_media(item_path, project_name, folder_name)
 
             project_item.setExpanded(True)
+
+    @pyqtSlot(QTreeWidgetItem)
+    def _on_item_expanded(self, item):
+        if item is None or item.text(0) not in ("Image", "Video"):
+            return
+        if item.data(0, self.MEDIA_LOADED_ROLE):
+            return
+        folder_item = item.parent()
+        if folder_item is None:
+            return
+        project_item = folder_item.parent()
+        if project_item is None:
+            return
+        self._refresh_media_node(
+            project_item.text(0), folder_item.text(0), item.text(0)
+        )
 
     def _populate_media_files(self, folder_item, item_path):
         image_node = None
@@ -461,6 +490,84 @@ class ProjectSidebar(QDockWidget):
         project_name, item_name, media_type = info
         self._refresh_media_node(project_name, item_name, media_type)
 
+    @pyqtSlot(str, str, str, str)
+    def notify_media_created(
+        self, project_name, item_name, media_type, full_path
+    ):
+        """Reveal a newly captured media file without relying on OS watcher timing."""
+        if media_type not in ("Image", "Video") or not os.path.isfile(full_path):
+            return
+
+        project_items = self.project_tree.findItems(
+            project_name, Qt.MatchFlag.MatchExactly
+        )
+        if not project_items:
+            return
+        project_item = project_items[0]
+        item_node = next(
+            (
+                project_item.child(index)
+                for index in range(project_item.childCount())
+                if project_item.child(index).text(0) == item_name
+            ),
+            None,
+        )
+        if item_node is None:
+            return
+
+        item_path = item_node.data(0, Qt.ItemDataRole.UserRole)
+        if not item_path:
+            return
+        expected_dir = os.path.normcase(
+            os.path.abspath(os.path.join(item_path, media_type))
+        )
+        actual_dir = os.path.normcase(
+            os.path.abspath(os.path.dirname(full_path))
+        )
+        if actual_dir != expected_dir:
+            return
+
+        media_node = next(
+            (
+                item_node.child(index)
+                for index in range(item_node.childCount())
+                if item_node.child(index).text(0) == media_type
+            ),
+            None,
+        )
+        if media_node is None:
+            return
+
+        filename = os.path.basename(full_path)
+        existing_names = [
+            media_node.child(index).text(0)
+            for index in range(media_node.childCount())
+        ]
+        if filename not in existing_names:
+            file_item = QTreeWidgetItem()
+            file_item.setText(0, filename)
+            file_item.setIcon(
+                0,
+                self.icon_image if media_type == "Image" else self.icon_video,
+            )
+            sort_key = filename.casefold()
+            insert_at = next(
+                (
+                    index
+                    for index, name in enumerate(existing_names)
+                    if sort_key < name.casefold()
+                ),
+                media_node.childCount(),
+            )
+            media_node.insertChild(insert_at, file_item)
+
+        project_item.setExpanded(True)
+        item_node.setExpanded(True)
+        was_expanded = media_node.isExpanded()
+        media_node.setExpanded(True)
+        if was_expanded:
+            self._refresh_media_node(project_name, item_name, media_type)
+
     def _refresh_media_node(self, project_name, item_name, media_type):
         proj_items = self.project_tree.findItems(project_name, Qt.MatchFlag.MatchExactly)
         if not proj_items:
@@ -483,7 +590,9 @@ class ProjectSidebar(QDockWidget):
         if not media_node:
             return
 
-        media_node.takeChildren()
+        if not media_node.isExpanded():
+            media_node.setData(0, self.MEDIA_LOADED_ROLE, False)
+            return
 
         item_path = item_node.data(0, Qt.ItemDataRole.UserRole)
         if not item_path:
@@ -492,21 +601,126 @@ class ProjectSidebar(QDockWidget):
         if not os.path.exists(media_dir):
             return
 
-        try:
-            for f in os.listdir(media_dir):
-                full_path = os.path.join(media_dir, f)
-                if os.path.isfile(full_path):
-                    ext = os.path.splitext(f)[1].lower()
-                    if media_type == "Image" and ext in ('.jpg', '.jpeg', '.png'):
-                        file_item = QTreeWidgetItem(media_node)
-                        file_item.setText(0, f)
-                        file_item.setIcon(0, self.icon_image)
-                    elif media_type == "Video" and ext == '.mp4':
-                        file_item = QTreeWidgetItem(media_node)
-                        file_item.setText(0, f)
-                        file_item.setIcon(0, self.icon_video)
-        except Exception as e:
-            print(f"Error scanning {media_dir}: {e}")
+        existing_worker = self._media_scan_workers.get(media_dir)
+        if existing_worker is not None and existing_worker.isRunning():
+            self._pending_media_refreshes.add(media_dir)
+            return
+
+        media_node.setData(0, self.MEDIA_LOADED_ROLE, False)
+        worker = FunctionWorker(self._scan_media_directory, media_dir, media_type)
+        self._media_scan_workers[media_dir] = worker
+        worker.result_ready.connect(
+            lambda names: self._apply_media_scan(
+                project_name, item_name, media_type, media_dir, names
+            )
+        )
+        worker.error_occurred.connect(
+            lambda message: print(f"Error scanning {media_dir}: {message}")
+        )
+        worker.finished.connect(
+            lambda: self._finish_media_scan(media_dir, worker)
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    @staticmethod
+    def _scan_media_directory(media_dir, media_type):
+        valid_extensions = (
+            ('.jpg', '.jpeg', '.png')
+            if media_type == "Image"
+            else ('.mp4',)
+        )
+        with os.scandir(media_dir) as entries:
+            names = [
+                entry.name
+                for entry in entries
+                if entry.is_file()
+                and os.path.splitext(entry.name)[1].lower() in valid_extensions
+            ]
+        return sorted(names, key=str.casefold)
+
+    def _finish_media_scan(self, media_dir, worker):
+        if self._media_scan_workers.get(media_dir) is worker:
+            del self._media_scan_workers[media_dir]
+        if media_dir not in self._pending_media_refreshes:
+            return
+        self._pending_media_refreshes.discard(media_dir)
+        info = self.watched_paths.get(media_dir)
+        if info:
+            QTimer.singleShot(
+                0,
+                lambda current=info: self._refresh_media_node(*current),
+            )
+
+    def _apply_media_scan(
+        self, project_name, item_name, media_type, media_dir, names
+    ):
+        if media_dir in self._pending_media_refreshes:
+            return
+        current_info = self.watched_paths.get(media_dir)
+        if current_info != (project_name, item_name, media_type):
+            return
+
+        project_items = self.project_tree.findItems(
+            project_name, Qt.MatchFlag.MatchExactly
+        )
+        if not project_items:
+            return
+        project_item = project_items[0]
+        item_node = next(
+            (
+                project_item.child(index)
+                for index in range(project_item.childCount())
+                if project_item.child(index).text(0) == item_name
+            ),
+            None,
+        )
+        if item_node is None:
+            return
+        media_node = next(
+            (
+                item_node.child(index)
+                for index in range(item_node.childCount())
+                if item_node.child(index).text(0) == media_type
+            ),
+            None,
+        )
+        if media_node is None or not media_node.isExpanded():
+            return
+
+        media_node.takeChildren()
+        self._append_media_batch(media_node, media_type, names, 0)
+
+    def _append_media_batch(self, media_node, media_type, names, start):
+        if media_node.treeWidget() is not self.project_tree:
+            return
+        end = min(start + 200, len(names))
+        icon = self.icon_image if media_type == "Image" else self.icon_video
+        for name in names[start:end]:
+            file_item = QTreeWidgetItem(media_node)
+            file_item.setText(0, name)
+            file_item.setIcon(0, icon)
+        if end < len(names):
+            QTimer.singleShot(
+                0,
+                lambda: self._append_media_batch(
+                    media_node, media_type, names, end
+                ),
+            )
+        else:
+            media_node.setData(0, self.MEDIA_LOADED_ROLE, True)
+
+    def shutdown(self, wait_ms=500):
+        still_running = False
+        for worker in list(self._media_scan_workers.values()):
+            if worker.isRunning():
+                worker.requestInterruption()
+                worker.wait(wait_ms)
+            still_running = still_running or worker.isRunning()
+        if not still_running:
+            self._media_scan_workers.clear()
+            self._pending_media_refreshes.clear()
+        return not still_running
 
     def remove_project_item(self, project_name):
         items = self.project_tree.findItems(project_name, Qt.MatchFlag.MatchExactly)

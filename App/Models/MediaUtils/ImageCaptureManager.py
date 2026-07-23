@@ -1,7 +1,6 @@
 # App/Models/MediaUtils/ImageCaptureManager.py
 import os
 from datetime import datetime
-import numpy as np
 
 class ImageProcessor:
     """
@@ -18,6 +17,9 @@ class ImageProcessor:
             return None
         
         try:
+            import cv2
+            import numpy as np
+
             width = qimage.width()
             height = qimage.height()
             ptr = qimage.bits()
@@ -89,7 +91,7 @@ class ImageCaptureManager:
                 return False, "", msg
             
             # Generate filename with timestamp - using PNG for lossless quality
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             filename = f"TNH_{timestamp}.png"
             filepath = os.path.join(self.image_folder, filename)
             

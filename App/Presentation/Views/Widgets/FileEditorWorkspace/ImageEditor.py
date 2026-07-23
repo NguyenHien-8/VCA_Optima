@@ -1,31 +1,30 @@
 # App/Presentation/Views/Widgets/FileEditorWorkspace/ImageEditor.py
 import os
 import numpy as np
-from PIL import Image
-import io
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFileDialog, QSizePolicy, QMessageBox,
                              QGroupBox)
-from PyQt6.QtCore import  Qt, pyqtSlot, pyqtSignal, QSize, QBuffer, QIODevice
-from PyQt6.QtGui import QPixmap, QIcon, QPainter
+from PyQt6.QtCore import Qt, pyqtSlot, pyqtSignal, QSize, QTimer
+from PyQt6.QtGui import QImage, QPixmap, QIcon, QPainter
 
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-from App.Presentation.Views.Widgets.DropletAnalysisWindow import DropletAnalysisWindow
-from App.Presentation.ViewModels.FeatureViewModel.DropletAnalysisViewModel import DropletAnalysisViewModel
 from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet, resource_path
 
 
 class ImageEditor(QWidget):
     sig_open_video = pyqtSignal(str, str)
+    close_ready = pyqtSignal()
+
     def __init__(self, view_model, parent=None):
         super().__init__(parent)
         self.view_model = view_model
         self.current_pixmap = None
+        self._close_when_idle = False
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setObjectName("ImageEditor")
@@ -49,6 +48,8 @@ class ImageEditor(QWidget):
 
         # Store list of Droplet Analysis windows opened from this editor
         self.droplet_windows = []
+        if hasattr(self.view_model, "workers_idle"):
+            self.view_model.workers_idle.connect(self._maybe_emit_close_ready)
 
     def load_style(self):
         apply_stylesheet(self, "ImageEditorStyles.qss")
@@ -142,10 +143,12 @@ class ImageEditor(QWidget):
         main_layout.addWidget(control_panel, stretch=0)
 
         # Connect Matplotlib events for zoom/pan
-        self.canvas.mpl_connect('scroll_event', self.on_scroll)
-        self.canvas.mpl_connect('button_press_event', self.on_mouse_press)
-        self.canvas.mpl_connect('button_release_event', self.on_mouse_release)
-        self.canvas.mpl_connect('motion_notify_event', self.on_mouse_move)
+        self._mpl_connection_ids = [
+            self.canvas.mpl_connect('scroll_event', self.on_scroll),
+            self.canvas.mpl_connect('button_press_event', self.on_mouse_press),
+            self.canvas.mpl_connect('button_release_event', self.on_mouse_release),
+            self.canvas.mpl_connect('motion_notify_event', self.on_mouse_move),
+        ]
 
         self.ax = None  # will be created when drawing the image
 
@@ -160,13 +163,15 @@ class ImageEditor(QWidget):
     # Function to convert QPixmap to numpy array (RGB)
     def pixmap_to_array(self, pixmap):
         """Convert QPixmap to a numpy array (H, W, 3) of type uint8."""
-        buffer = QBuffer()
-        buffer.open(QIODevice.OpenModeFlag.ReadWrite)
-        pixmap.save(buffer, "PNG")
-        buffer.seek(0)
-        data = buffer.data().data()
-        pil_image = Image.open(io.BytesIO(data)).convert('RGB')
-        return np.array(pil_image)
+        image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
+        ptr = image.bits()
+        ptr.setsize(image.sizeInBytes())
+        rows = np.frombuffer(ptr, dtype=np.uint8).reshape(
+            image.height(), image.bytesPerLine()
+        )
+        return rows[:, : image.width() * 3].reshape(
+            image.height(), image.width(), 3
+        ).copy()
 
     # Draw the image onto the canvas
     def draw_image(self):
@@ -184,7 +189,7 @@ class ImageEditor(QWidget):
             self.ax.set_xlabel('x [mm]', fontsize=11)
             self.ax.set_ylabel('y [mm]', fontsize=11)
             self.figure.tight_layout()
-            self.canvas.draw()
+            self.canvas.draw_idle()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot display image:\n{str(e)}")
 
@@ -341,6 +346,9 @@ class ImageEditor(QWidget):
             return
 
         try:
+            from App.Presentation.Views.Widgets.DropletAnalysisWindow import DropletAnalysisWindow
+            from App.Presentation.ViewModels.FeatureViewModel.DropletAnalysisViewModel import DropletAnalysisViewModel
+
             droplet_view_model = DropletAnalysisViewModel()
             droplet_window = DropletAnalysisWindow(
                 droplet_view_model,
@@ -362,6 +370,7 @@ class ImageEditor(QWidget):
     def _on_droplet_window_closed(self, window):
         if window in self.droplet_windows:
             self.droplet_windows.remove(window)
+        self._maybe_emit_close_ready()
 
     @pyqtSlot(QPixmap)
     def on_image_loaded(self, pixmap):
@@ -388,4 +397,43 @@ class ImageEditor(QWidget):
         for window in self.droplet_windows[:]:
             if window and window.isVisible():
                 window.close()
+
+        view_model_busy = (
+            hasattr(self.view_model, "has_running_workers")
+            and self.view_model.has_running_workers()
+        )
+        child_busy = any(
+            window is not None and window.isVisible()
+            for window in self.droplet_windows
+        )
+        if view_model_busy or child_busy:
+            self._close_when_idle = True
+            if hasattr(self.view_model, "request_shutdown"):
+                self.view_model.request_shutdown()
+            event.ignore()
+            return
+
+        self.droplet_windows.clear()
+        for connection_id in self._mpl_connection_ids:
+            self.canvas.mpl_disconnect(connection_id)
+        self._mpl_connection_ids.clear()
+        self.figure.clear()
+        self.current_pixmap = None
+        if hasattr(self.view_model, "close"):
+            self.view_model.close()
         super().closeEvent(event)
+
+    def _maybe_emit_close_ready(self):
+        if not self._close_when_idle:
+            return
+        view_model_busy = (
+            hasattr(self.view_model, "has_running_workers")
+            and self.view_model.has_running_workers()
+        )
+        child_busy = any(
+            window is not None and window.isVisible()
+            for window in self.droplet_windows
+        )
+        if not view_model_busy and not child_busy:
+            self._close_when_idle = False
+            QTimer.singleShot(0, self.close_ready.emit)

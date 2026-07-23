@@ -2,24 +2,26 @@
 
 ## Project Overview
 
-Lớp hạ tầng chứa các adapter kỹ thuật mà nghiệp vụ phụ thuộc: tra cứu tài nguyên, repositories SQLite và các file database đi kèm.
+Tầng hạ tầng cung cấp persistence, định vị tài nguyên và xử lý lỗi dùng chung. Tầng này không chứa logic UI hoặc nghiệp vụ project.
 
 ## Annotated Directory Structure
 
-- `Helpers/` — helper tìm resource path.
-- `Repositories/` — API đọc/ghi config và session.
-- `Persistence/` — `ConfigStorage.db` và `SessionData.db`.
+- `CrashHandler.py` — rotating log, Python/thread exception hook và native fault log.
+- `Helpers/ResourceHelper.py` — giải quyết đường dẫn icon, QSS và asset trong source/PyInstaller.
+- `Repositories/` — Config/Session SQLite repositories và `StoragePath`.
+- `Persistence/` — vị trí database legacy dùng cho migration.
 - `__init__.py` — package marker.
 
 ## Core Algorithms & Implementation
 
-- Repository dùng câu lệnh tham số hóa và `INSERT OR REPLACE` để lưu key–value.
-- Session serialize giá trị bằng JSON; config lưu chuỗi rồi ép kiểu ở API chuyên biệt.
-- Model/View không cần biết SQL schema hoặc vị trí bundle.
+- Log được ghi trong Local App Data và tự xoay vòng để giới hạn dung lượng.
+- Database runtime đặt ở thư mục người dùng có quyền ghi; dữ liệu legacy được copy một lần nếu cần.
+- SQLite connection luôn commit/rollback/close qua context manager.
+- Lỗi logging hoặc migration không được phép ngăn ứng dụng khởi động.
 
 ## Data Flow
 
-1. Manager gọi Repository.
-2. Repository mở SQLite connection ngắn hạn, đọc/commit rồi đóng.
-3. Helper trả absolute path cho View khi tải QSS/icon.
-
+1. `main.py` cài `CrashHandler` trước khi import PyQt shell.
+2. Repository yêu cầu đường dẫn từ `StoragePath`, mở transaction ngắn và đóng connection ngay.
+3. ViewModel/Model đọc ghi cấu hình hoặc session qua repository.
+4. Exception chưa xử lý được ghi log và hiển thị thông báo an toàn trên main thread.

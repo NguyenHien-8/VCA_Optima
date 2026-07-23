@@ -1,6 +1,5 @@
 import os
 import numpy as np
-import cv2
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
@@ -8,7 +7,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QGroupBox, QSplitter, QRadioButton,
     QTextEdit, QMessageBox, QButtonGroup, QInputDialog, QComboBox
 )
-from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtGui import QPixmap, QIcon
 
 import matplotlib
@@ -19,6 +18,7 @@ from matplotlib.patches import Arc, FancyArrowPatch
 
 from App.Models.Analysis.AnalysisManager import AnalysisManager
 from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet, resource_path
+from App.Presentation.ViewModels.Workers import FunctionWorker
 
 
 class DropletAnalysisWindow(QMainWindow):
@@ -62,6 +62,8 @@ class DropletAnalysisWindow(QMainWindow):
         self.view_model = view_model
         self.input_pixmap = pixmap
         self.analysis_manager = AnalysisManager()
+        self._analysis_workers = set()
+        self._close_when_idle = False
 
         # ===== Auto-save context =====
         self.source_image_path = source_image_path
@@ -75,6 +77,7 @@ class DropletAnalysisWindow(QMainWindow):
         self.setObjectName("DropletAnalysisWindow")
 
         self.view_model.image_loaded.connect(self.on_image_loaded)
+        self.view_model.image_data_ready.connect(self.view_model.perform_analysis)
         self.view_model.analysis_completed.connect(self.on_analysis_completed)
         self.view_model.error_occurred.connect(self.on_error)
 
@@ -142,13 +145,14 @@ class DropletAnalysisWindow(QMainWindow):
         self.setup_ui()
         self.load_style()
 
-        self.canvas.mpl_connect('scroll_event', self.on_scroll)
-        self.canvas.mpl_connect('button_press_event', self.on_mouse_press)
-        self.canvas.mpl_connect('button_release_event', self.on_mouse_release)
-        self.canvas.mpl_connect('motion_notify_event', self.on_mouse_move)
+        self._mpl_connection_ids = [
+            self.canvas.mpl_connect('scroll_event', self.on_scroll),
+            self.canvas.mpl_connect('button_press_event', self.on_mouse_press),
+            self.canvas.mpl_connect('button_release_event', self.on_mouse_release),
+            self.canvas.mpl_connect('motion_notify_event', self.on_mouse_move),
+        ]
 
-        if self.view_model.load_image_from_pixmap(self.input_pixmap):
-            self.view_model.perform_analysis()
+        self.view_model.load_image_from_pixmap(self.input_pixmap)
 
     # =========================
     # UI
@@ -1054,23 +1058,48 @@ class DropletAnalysisWindow(QMainWindow):
         if not ok:
             return
 
-        try:
+        def detect_edges():
             from App.Models.Analysis.DropletAnalysis import auto_detect_edge_points
-            new_points = auto_detect_edge_points(
-                self.view_model.image_array,
+
+            return auto_detect_edge_points(
+                image_array,
                 num_points,
                 physical_width=5.0,
                 physical_height=3.0
             )
-            if not new_points:
-                QMessageBox.warning(self, "No Edges", "No edges detected.")
-                return
 
-            self.measurement_points = new_points
-            self._draw_measurement_points()
-            self.update_info_text(f"Auto detected {len(new_points)} edge points.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Edge detection failed: {str(e)}")
+        image_array = self.view_model.image_array.copy()
+        self.btn_auto_detect.setEnabled(False)
+        self.update_info_text("Detecting droplet edge...")
+        self._start_analysis_worker(detect_edges, self._on_edges_detected)
+
+    def _on_edges_detected(self, new_points):
+        self.btn_auto_detect.setEnabled(True)
+        if not new_points:
+            QMessageBox.warning(self, "No Edges", "No edges detected.")
+            return
+        self.measurement_points = new_points
+        self._draw_measurement_points()
+        self.update_info_text(f"Auto detected {len(new_points)} edge points.")
+
+    def _start_analysis_worker(self, function, callback):
+        worker = FunctionWorker(function)
+        self._analysis_workers.add(worker)
+        worker.result_ready.connect(callback)
+        worker.error_occurred.connect(self._on_analysis_worker_error)
+        worker.finished.connect(lambda: self._finish_analysis_worker(worker))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _finish_analysis_worker(self, worker):
+        self._analysis_workers.discard(worker)
+        if self._close_when_idle and not self._analysis_workers:
+            QTimer.singleShot(0, self.close)
+
+    def _on_analysis_worker_error(self, message):
+        self.btn_auto_detect.setEnabled(True)
+        self.btn_analysis_manually.setEnabled(True)
+        QMessageBox.critical(self, "Analysis Error", message)
 
     def on_mouse_press(self, event):
         if event.dblclick and event.button == 3 and (self.is_measuring or self.is_baseline_mode) and event.inaxes:
@@ -1306,7 +1335,7 @@ Display:
         self.btn_baseline.setChecked(False)
 
         if self.view_model.perform_analysis():
-            self.update_display()
+            self.update_info_text("Refreshing analysis...")
         else:
             QMessageBox.warning(self, "Refresh Failed", "Could not refresh analysis.")
 
@@ -1388,11 +1417,21 @@ Display:
             return
 
         analysis_method = self.analysis_method
-        results = self.analysis_manager.analyze_droplet(
-            analysis_method,
-            self.baseline_coeffs,
-            self.measurement_points
+        baseline_coeffs = tuple(self.baseline_coeffs)
+        measurement_points = list(self.measurement_points)
+        self.btn_analysis_manually.setEnabled(False)
+        self.update_info_text(f"Running {analysis_method}...")
+        self._start_analysis_worker(
+            lambda: self.analysis_manager.analyze_droplet(
+                analysis_method, baseline_coeffs, measurement_points
+            ),
+            lambda results: self._on_droplet_analysis_finished(
+                analysis_method, results
+            ),
         )
+
+    def _on_droplet_analysis_finished(self, analysis_method, results):
+        self.btn_analysis_manually.setEnabled(True)
         if results is None:
             QMessageBox.critical(
                 self, "Analysis Failed",
@@ -1467,6 +1506,22 @@ Display:
     # lifecycle
     # =========================
     def closeEvent(self, event):
+        running_workers = [
+            worker for worker in self._analysis_workers if worker.isRunning()
+        ]
+        if running_workers:
+            self._close_when_idle = True
+            for worker in running_workers:
+                worker.requestInterruption()
+            self.update_info_text("Waiting for analysis to finish before closing...")
+            event.ignore()
+            return
+        for connection_id in self._mpl_connection_ids:
+            self.canvas.mpl_disconnect(connection_id)
+        self._mpl_connection_ids.clear()
+        self.figure.clear()
+        if hasattr(self.view_model, "close"):
+            self.view_model.close()
         if self in DropletAnalysisWindow._instances:
             DropletAnalysisWindow._instances.remove(self)
         super().closeEvent(event)

@@ -123,11 +123,14 @@ class EditorWorkspace(QWidget):
     def close_tab(self, index):
         widget = self.tab_widget.widget(index)
         if widget:
+            if not widget.close():
+                return False
             widget.deleteLater()
         self.tab_widget.removeTab(index)
         
         if self.tab_widget.count() == 0:
             self.layout_stack.setCurrentIndex(0)
+        return True
 
     def find_tab_by_path(self, full_path):
         if full_path is None:

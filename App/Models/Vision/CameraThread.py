@@ -1,6 +1,5 @@
 # App/Models/Vision/CameraThread.py
 import sys
-import cv2
 from PyQt6.QtCore import QThread, pyqtSignal, QMutex, QWaitCondition
 from PyQt6.QtGui import QImage
 
@@ -24,8 +23,7 @@ class CameraThread(QThread):
         self._is_running = False
         self.wait_condition.wakeAll()
         self.mutex.unlock()
-        self.quit()
-        self.wait()
+        self.requestInterruption()
 
     def set_paused(self, state: bool):
         self.mutex.lock()
@@ -35,48 +33,67 @@ class CameraThread(QThread):
         self.mutex.unlock()
 
     def run(self):
-        if sys.platform.startswith("win"):
-            cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
-        else:
-            cap = cv2.VideoCapture(self.camera_index)
+        cap = None
+        try:
+            # OpenCV is intentionally imported in the worker, not on the UI startup path.
+            import cv2
 
-        width, height = self.resolution
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            if sys.platform.startswith("win"):
+                cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+            else:
+                cap = cv2.VideoCapture(self.camera_index)
 
-        if not cap.isOpened():
-            self.error_signal.emit(f"Failed to open camera {self.camera_index}")
-            return
+            width, height = self.resolution
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
-        # --- Get actual FPS from the camera ---
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps is None or fps <= 0:
-            fps = 30.0
-        self.fps = fps
-        self.fps_signal.emit(self.fps)
+            if not cap.isOpened():
+                self.error_signal.emit(f"Failed to open camera {self.camera_index}")
+                return
 
-        while True:
-            self.mutex.lock()
-            if not self._is_running:
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps is None or fps <= 0:
+                fps = 30.0
+            self.fps = fps
+            self.fps_signal.emit(self.fps)
+
+            while not self.isInterruptionRequested():
+                self.mutex.lock()
+                is_running = self._is_running
+                is_paused = self._is_paused
+                if is_paused and is_running:
+                    self.wait_condition.wait(self.mutex, 250)
                 self.mutex.unlock()
-                break
 
-            if self._is_paused:
-                self.wait_condition.wait(self.mutex)
-                self.mutex.unlock()
-                continue
-            self.mutex.unlock()
+                if not is_running:
+                    break
+                if is_paused:
+                    continue
 
-            ret, cv_img = cap.read()
-            if ret:
+                ret, cv_img = cap.read()
+                if not ret:
+                    if not self.isInterruptionRequested():
+                        self.error_signal.emit(
+                            f"Lost signal from Camera {self.camera_index}"
+                        )
+                    break
+
                 rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb_image.shape
                 bytes_per_line = ch * w
-                convert_to_qt_format = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-                p_image = convert_to_qt_format.copy()
-                self.change_pixmap_signal.emit(p_image)
-            else:
-                self.error_signal.emit(f"Lost signal from Camera {self.camera_index}")
-                break
-
-        cap.release()
+                image = QImage(
+                    rgb_image.data,
+                    w,
+                    h,
+                    bytes_per_line,
+                    QImage.Format.Format_RGB888,
+                ).copy()
+                self.change_pixmap_signal.emit(image)
+        except Exception as exc:
+            if not self.isInterruptionRequested():
+                self.error_signal.emit(
+                    f"Camera {self.camera_index} failed: {type(exc).__name__}: {exc}"
+                )
+        finally:
+            if cap is not None:
+                cap.release()

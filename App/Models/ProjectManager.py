@@ -2,7 +2,17 @@ import os
 import shutil
 import json
 import time
+import threading
+from functools import wraps
 from pathlib import Path
+
+
+def _synchronized(method):
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 class ProjectManager:
@@ -15,6 +25,7 @@ class ProjectManager:
         self.current_projects = {}
         self.project_states = {}
         self.item_states = {}
+        self._lock = threading.RLock()
 
         documents_path = Path.home() / "Documents" / "TNH Optima Projects"
         self.temp_root = str(documents_path)
@@ -22,6 +33,26 @@ class ProjectManager:
 
     def _get_project_root(self, project_name):
         return self.current_projects.get(project_name)
+
+    @staticmethod
+    def _is_valid_name(name):
+        if not isinstance(name, str):
+            return False
+        name = name.strip()
+        if not name or name in (".", "..") or os.path.basename(name) != name:
+            return False
+        if any(char in name for char in '<>:"/\\|?*'):
+            return False
+        return not name.endswith((" ", "."))
+
+    @staticmethod
+    def _is_within(path, parent):
+        try:
+            return os.path.commonpath(
+                (os.path.abspath(path), os.path.abspath(parent))
+            ) == os.path.abspath(parent)
+        except (TypeError, ValueError):
+            return False
 
     def _cleanup_dict(self, project_name):
         if project_name in self.current_projects:
@@ -32,6 +63,8 @@ class ProjectManager:
             del self.item_states[project_name]
 
     def _safe_rename(self, old_path, new_path, retry_count=5, delay=0.3):
+        if os.path.exists(new_path):
+            raise FileExistsError(f"Destination already exists: {new_path}")
         for attempt in range(retry_count):
             try:
                 os.rename(old_path, new_path)
@@ -43,7 +76,10 @@ class ProjectManager:
                     raise e
         return False
 
+    @_synchronized
     def create_project(self, project_name, specific_path=None):
+        if not self._is_valid_name(project_name):
+            return False, "Invalid project name."
         if specific_path:
             base_path = specific_path
             status = 'SAVED'
@@ -75,11 +111,13 @@ class ProjectManager:
         except Exception as e:
             return False, str(e)
 
+    @_synchronized
     def save_project(self, project_name):
         if project_name not in self.current_projects:
             return False, "Project not found"
         return True, "Project Saved"
 
+    @_synchronized
     def save_project_as(self, project_name, target_folder_path):
         source_path = self._get_project_root(project_name)
         if not source_path:
@@ -106,6 +144,7 @@ class ProjectManager:
         except Exception as e:
             return False, str(e)
 
+    @_synchronized
     def delete_project(self, project_name):
         full_path = self._get_project_root(project_name)
         if full_path and os.path.exists(full_path):
@@ -117,9 +156,12 @@ class ProjectManager:
                 return False, str(e)
         return False, "Project path not found"
     
+    @_synchronized
     def rename_project(self, old_name, new_name):
         if old_name not in self.current_projects:
             return False, "Project not found"
+        if not self._is_valid_name(new_name):
+            return False, "Invalid project name"
 
         old_path = self.current_projects[old_name]
         parent_dir = os.path.dirname(old_path)
@@ -129,17 +171,20 @@ class ProjectManager:
             self._safe_rename(old_path, new_path)
             self.current_projects[new_name] = new_path
             self.project_states[new_name] = self.project_states[old_name]
+            if old_name in self.item_states:
+                self.item_states[new_name] = self.item_states[old_name]
             self._cleanup_dict(old_name)
             return True, "Success"
         except Exception as e:
             return False, str(e)
         
+    @_synchronized
     def open_project(self, folder_path):
         project_name = os.path.basename(folder_path)
 
         abs_folder = os.path.abspath(folder_path)
         abs_temp = os.path.abspath(self.temp_root)
-        status = 'TEMP' if abs_folder.startswith(abs_temp) else 'SAVED'
+        status = 'TEMP' if self._is_within(abs_folder, abs_temp) else 'SAVED'
 
         if project_name in self.current_projects:
             self.current_projects[project_name] = folder_path
@@ -168,10 +213,14 @@ class ProjectManager:
     def get_project_path(self, project_name):
         return self.current_projects.get(project_name)
 
+    @_synchronized
     def close_project(self, project_name):
         self._cleanup_dict(project_name)
 
+    @_synchronized
     def create_structure(self, project_name, folder_name):
+        if not self._is_valid_name(folder_name):
+            return False, "Invalid item name"
         project_path = self._get_project_root(project_name)
         if not project_path:
             return False, "Project not found"
@@ -193,7 +242,10 @@ class ProjectManager:
         except Exception as e:
             return False, str(e)
 
+    @_synchronized
     def delete_item(self, project_name, folder_name):
+        if not self._is_valid_name(folder_name):
+            return False, "Invalid item name"
         project_path = self._get_project_root(project_name)
         if project_path:
             full_path = os.path.join(project_path, folder_name)
@@ -207,7 +259,10 @@ class ProjectManager:
                     return False, str(e)
         return False, "Item not found"
 
+    @_synchronized
     def rename_item(self, project_name, old_name, new_name):
+        if not self._is_valid_name(new_name):
+            return False, "Invalid item name"
         project_path = self._get_project_root(project_name)
         if not project_path:
             return False, "Project context lost"
@@ -255,7 +310,7 @@ class ProjectManager:
             return False
         abs_project = os.path.abspath(project_path)
         abs_item = os.path.abspath(item_path)
-        return abs_item.startswith(abs_project)
+        return self._is_within(abs_item, abs_project)
 
     def _scan_project_items(self, folder_path):
         items = []
@@ -268,13 +323,17 @@ class ProjectManager:
             pass
         return items
 
+    @_synchronized
     def save_item_as(self, project_name, item_name):
         if project_name not in self.item_states:
             self.item_states[project_name] = {}
         self.item_states[project_name][item_name] = 'SAVED'
         return True, "Item marked as saved."
 
+    @_synchronized
     def copy_item_structure(self, src_project_name, src_folder_name, target_project_name):
+        if not self._is_valid_name(src_folder_name):
+            return False, "Invalid source item name.", ""
         src_root = self._get_project_root(src_project_name)
         tgt_root = self._get_project_root(target_project_name)
 
@@ -302,6 +361,7 @@ class ProjectManager:
         except Exception as e:
             return False, f"Copy Failed: {str(e)}", ""
 
+    @_synchronized
     def move_item_structure(self, src_project_name, src_folder_name, target_project_name):
         success, msg, new_name = self.copy_item_structure(src_project_name, src_folder_name, target_project_name)
 
@@ -314,6 +374,8 @@ class ProjectManager:
             return False, msg, ""
 
     def _get_media_path(self, project_name, item_name, media_type):
+        if not self._is_valid_name(item_name):
+            return None
         project_path = self._get_project_root(project_name)
         if not project_path:
             return None
@@ -327,8 +389,13 @@ class ProjectManager:
 
         return None
 
+    @_synchronized
     def copy_file(self, src_project, src_item, src_media, src_file,
                   dst_project, dst_item, dst_media, new_name=None):
+        if not self._is_valid_name(src_file):
+            return False, "Invalid source file name", ""
+        if new_name is not None and not self._is_valid_name(new_name):
+            return False, "Invalid destination file name", ""
         src_media_path = self._get_media_path(src_project, src_item, src_media)
         if not src_media_path:
             return False, "Source project/item not found", ""
@@ -359,6 +426,7 @@ class ProjectManager:
         except Exception as e:
             return False, f"Copy failed: {str(e)}", ""
 
+    @_synchronized
     def move_file(self, src_project, src_item, src_media, src_file,
                   dst_project, dst_item, dst_media, new_name=None):
         success, msg, new_file_name = self.copy_file(
@@ -373,7 +441,10 @@ class ProjectManager:
         else:
             return False, msg, ""
 
+    @_synchronized
     def rename_file(self, project_name, item_name, media_type, old_name, new_name):
+        if not self._is_valid_name(new_name):
+            return False, "Invalid file name"
         media_path = self._get_media_path(project_name, item_name, media_type)
         if not media_path:
             return False, "Project/item not found"
@@ -392,7 +463,10 @@ class ProjectManager:
         except Exception as e:
             return False, f"Rename failed: {str(e)}"
 
+    @_synchronized
     def delete_file(self, project_name, item_name, media_type, file_name):
+        if not self._is_valid_name(file_name):
+            return False, "Invalid file name"
         media_path = self._get_media_path(project_name, item_name, media_type)
         if not media_path:
             return False, "Project/item not found"
@@ -407,6 +481,7 @@ class ProjectManager:
         except Exception as e:
             return False, f"Delete failed: {str(e)}"
 
+    @_synchronized
     def open_item(self, project_name, folder_path):
         if not self.is_folder_item(folder_path):
             return False, "Invalid item structure", "", ""
@@ -415,12 +490,12 @@ class ProjectManager:
         project_path = self._get_project_root(project_name)
         if not project_path:
             return False, "Project not found", "", ""
-        if not folder_path.startswith(project_path):
+        if not self._is_within(folder_path, project_path):
             return False, "Item does not belong to this project", "", ""
 
         abs_folder = os.path.abspath(folder_path)
         abs_temp = os.path.abspath(self.temp_root)
-        status = 'TEMP' if abs_folder.startswith(abs_temp) else 'SAVED'
+        status = 'TEMP' if self._is_within(abs_folder, abs_temp) else 'SAVED'
 
         if project_name not in self.item_states:
             self.item_states[project_name] = {}

@@ -1,6 +1,132 @@
 # App/Presentation/ViewModels/Workers.py
 import os
+import tempfile
 from PyQt6.QtCore import QThread, pyqtSignal
+from App.Infrastructure.CrashHandler import log_exception
+
+
+def write_text_file_atomic(full_path, content, encoding="utf-8"):
+    """Write text atomically so an interrupted save cannot truncate the target."""
+    target_dir = os.path.dirname(os.path.abspath(full_path))
+    os.makedirs(target_dir, exist_ok=True)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding=encoding,
+            dir=target_dir,
+            prefix=".tnh-optima-",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = handle.name
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, full_path)
+        return full_path
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+class FunctionWorker(QThread):
+    """Run one blocking callable away from the Qt GUI thread."""
+
+    result_ready = pyqtSignal(object)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, function, *args, **kwargs):
+        super().__init__()
+        if not callable(function):
+            raise TypeError("function must be callable")
+        self._function = function
+        self._args = args
+        self._kwargs = kwargs
+
+    def run(self):
+        if self.isInterruptionRequested():
+            return
+        try:
+            result = self._function(*self._args, **self._kwargs)
+        except Exception as exc:
+            log_exception(f"Background task failed: {self._function!r}")
+            self.error_occurred.emit(f"{type(exc).__name__}: {exc}")
+            return
+        if not self.isInterruptionRequested():
+            self.result_ready.emit(result)
+
+
+class SessionRestoreWorker(QThread):
+    """Load and inspect the saved workspace without blocking first paint."""
+
+    restored = pyqtSignal(object)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, session_manager, temp_root):
+        super().__init__()
+        self._session_manager = session_manager
+        self._temp_root = os.path.abspath(temp_root)
+
+    def run(self):
+        try:
+            self._session_manager.load_all()
+            projects = []
+
+            for raw_path in self._session_manager.get_open_projects():
+                if self.isInterruptionRequested():
+                    return
+                if not isinstance(raw_path, str) or not os.path.isdir(raw_path):
+                    continue
+
+                path = os.path.abspath(raw_path)
+                project_name = os.path.basename(os.path.normpath(path))
+                try:
+                    is_temp = os.path.commonpath((path, self._temp_root)) == self._temp_root
+                except ValueError:
+                    is_temp = False
+
+                items = []
+                try:
+                    with os.scandir(path) as entries:
+                        for entry in entries:
+                            if self.isInterruptionRequested():
+                                return
+                            if not entry.is_dir():
+                                continue
+                            image_dir = os.path.join(entry.path, "Image")
+                            video_dir = os.path.join(entry.path, "Video")
+                            if os.path.isdir(image_dir) and os.path.isdir(video_dir):
+                                items.append(entry.name)
+                except OSError as exc:
+                    self.error_occurred.emit(
+                        f"Cannot scan restored project '{project_name}': {exc}"
+                    )
+                    continue
+
+                projects.append({
+                    "name": project_name,
+                    "path": path,
+                    "state": "TEMP" if is_temp else "SAVED",
+                    "items": sorted(items, key=str.casefold),
+                })
+
+            result = {
+                "projects": projects,
+                "opened_items": self._session_manager.get_opened_items(),
+                "editors": self._session_manager.get_open_editors(),
+                "expanded_paths": self._session_manager.get_expanded_paths(),
+            }
+            if not self.isInterruptionRequested():
+                self.restored.emit(result)
+        except Exception as exc:
+            self.error_occurred.emit(
+                f"Session restore failed: {type(exc).__name__}: {exc}"
+            )
+
 
 class FileOperationWorker(QThread):
     """

@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt
 
 from App.Presentation.ViewModels.DialogViewModel.ConfigHardwareViewModel import ConfigHardwareViewModel
+from App.Presentation.ViewModels.Workers import FunctionWorker
 from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
 
 class ConfigHardwareDialog(QDialog):
@@ -12,6 +13,7 @@ class ConfigHardwareDialog(QDialog):
         super().__init__(parent)
 
         self.view_model = ConfigHardwareViewModel(hardware_manager)
+        self._workers = set()
 
         self.input_height = 28
         self.input_min_width = 180
@@ -117,10 +119,39 @@ class ConfigHardwareDialog(QDialog):
     def refresh_ports(self):
         current = self.combo_port.currentText()
         self.combo_port.clear()
-        ports = self.view_model.scan_ports()
+        self.combo_port.setPlaceholderText("Scanning...")
+        self.btn_refresh.setEnabled(False)
+        self._start_worker(
+            self.view_model.scan_ports,
+            lambda ports: self._on_ports_scanned(ports, current),
+        )
+
+    def _on_ports_scanned(self, ports, current):
         self.combo_port.addItems(ports)
         if current:
             self.combo_port.setEditText(current)
+        self.combo_port.setPlaceholderText("Select port...")
+        self.btn_refresh.setEnabled(True)
+
+    def _start_worker(self, function, callback, *args):
+        worker = FunctionWorker(function, *args)
+        self._workers.add(worker)
+        worker.result_ready.connect(callback)
+        worker.error_occurred.connect(self._on_worker_error)
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _cleanup_worker(self, worker):
+        self._workers.discard(worker)
+        if not any(item.isRunning() for item in self._workers):
+            self.btn_refresh.setEnabled(True)
+
+    def _on_worker_error(self, message):
+        self.btn_refresh.setEnabled(True)
+        self.btn_apply.setEnabled(True)
+        self.btn_cancel.setEnabled(True)
+        QMessageBox.critical(self, "Hardware Error", message.splitlines()[0])
 
     def on_apply(self):
         try:
@@ -139,13 +170,38 @@ class ConfigHardwareDialog(QDialog):
              return
 
         period = self.txt_period.text().strip()
-        success, msg = self.view_model.apply_connection(port, baud, period)
+        self.btn_apply.setEnabled(False)
+        self.btn_cancel.setEnabled(False)
+        self.btn_apply.setText("Connecting...")
+        self._start_worker(
+            self.view_model.apply_connection,
+            lambda result: self._on_connection_finished(port, result),
+            port,
+            baud,
+            period,
+        )
 
+    def _on_connection_finished(self, port, result):
+        self.btn_apply.setText("Apply and Close")
+        self.btn_apply.setEnabled(True)
+        self.btn_cancel.setEnabled(True)
+        success, message = result
         if success:
             self.accept()
-        else:
-            QMessageBox.critical(self, "Connection Failed", 
-                                 f"Could not connect to {port}.\n\nError Detail:\n{msg}")
+            return
+        QMessageBox.critical(
+            self,
+            "Connection Failed",
+            f"Could not connect to {port}.\n\nError Detail:\n{message}",
+        )
 
     def on_cancel(self):
+        if any(worker.isRunning() for worker in self._workers):
+            return
         self.reject()
+
+    def closeEvent(self, event):
+        if any(worker.isRunning() for worker in self._workers):
+            event.ignore()
+            return
+        super().closeEvent(event)

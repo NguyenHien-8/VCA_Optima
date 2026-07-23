@@ -47,8 +47,7 @@ class ControlPanelManager:
         # 4. Send command
         try:
             print(f"[ControlPanelManager] Sending Packet: {packet}")
-            self.hardware_manager.send_serial_command(packet)
-            return True, "Command sent successfully."
+            return self.hardware_manager.send_serial_command(packet)
         except Exception as e:
             print(f"[ControlPanelManager] Error sending packet: {e}")
             return False, f"Transmission Error: {str(e)}"

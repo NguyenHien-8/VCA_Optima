@@ -42,6 +42,10 @@ class HardwareManager(QObject):
 
     def is_connected(self):
         return self.connector.is_connected()
+
+    def cleanup(self):
+        """Release the serial port during application shutdown."""
+        return self.connector.disconnect()
     
     def send_serial_command(self, command):
         """Receive string commands and send them through the connector"""
@@ -51,5 +55,7 @@ class HardwareManager(QObject):
                 print(f"[HardwareManager] {msg}")
             else:
                 print(f"[HardwareManager] Error sending: {msg}")
-        else:
-            print("[HardwareManager] Cannot send: Not connected.")
+            return success, msg
+        message = "Cannot send: hardware is not connected."
+        print(f"[HardwareManager] {message}")
+        return False, message

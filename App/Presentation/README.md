@@ -2,23 +2,25 @@
 
 ## Project Overview
 
-Lớp trình bày PyQt6 tổ chức theo MVVM, chịu trách nhiệm UI, signal/slot, tab editor và dialogs.
+Tầng trình bày PyQt6 tổ chức theo MVVM, chịu trách nhiệm widget, signal/slot, worker orchestration và lifecycle UI.
 
 ## Annotated Directory Structure
 
-- `ViewModels/` — điều phối Models và state dành cho View.
-- `Views/` — cửa sổ, dialog và widget.
+- `ViewModels/` — state, validation, worker và adapter tới Models.
+- `Views/` — MainView, dialogs, workspace, sidebar và feature widgets.
 - `__init__.py` — package marker.
 
 ## Core Algorithms & Implementation
 
-- Qt signal/slot tách UI events khỏi nghiệp vụ và cho phép worker threads trả kết quả an toàn.
-- `MainViewModel` là composition root của managers/repositories; `MainView` lắp ráp widget và kết nối signals.
-- View chỉ giữ state hiển thị/ngắn hạn; project, device và persistence đi qua Models.
+- View không thực hiện filesystem, serial hoặc phân tích nặng trực tiếp.
+- Kết quả worker quay lại UI qua Qt queued signal.
+- Editor nặng được import tại điểm sử dụng để giảm startup cost.
+- Close event có thể bị hoãn khi worker đang chạy; `close_ready` tiếp tục thao tác sau khi tài nguyên an toàn.
 
 ## Data Flow
 
-1. User event phát từ View.
-2. ViewModel gọi Model/worker và phát status/result signals.
-3. View cập nhật widget; khi đóng, ViewModel lưu session và cleanup worker/device.
-
+1. User event bắt đầu tại View.
+2. ViewModel validate và gọi Model/worker.
+3. Signal kết quả cập nhật widget trên UI thread.
+4. Capture/record phát sự kiện media cụ thể thay vì chỉ phụ thuộc filesystem watcher.
+5. Shutdown thu session state, dừng worker/device và giải phóng widget theo thứ tự.

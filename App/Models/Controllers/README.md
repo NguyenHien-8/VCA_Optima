@@ -2,23 +2,24 @@
 
 ## Project Overview
 
-Adapter giao tiếp cổng serial và lớp quản lý trạng thái kết nối phần cứng.
+Tầng controller sở hữu kết nối serial duy nhất và cung cấp API phần cứng thread-safe cho phần còn lại của ứng dụng.
 
 ## Annotated Directory Structure
 
-- `HardwareConnector.py` — singleton bọc pyserial, quét port, connect/retry/write/disconnect.
-- `HardwareManager.py` — QObject facade, giữ config và phát `connection_status_changed`.
+- `HardwareConnector.py` — singleton serial, scan port, connect/disconnect và write.
+- `HardwareManager.py` — facade QObject, cấu hình hiện tại và signal trạng thái.
 - `__init__.py` — package marker.
 
 ## Core Algorithms & Implementation
 
-- Connector chuẩn hóa port/baud, đóng kết nối cũ, thử mở tối đa ba lần và chờ thêm khi Windows báo Access Denied.
-- Timeout đọc/ghi 0.1 giây giúp tránh khóa UI; lỗi write làm connector tự disconnect.
-- Manager cô lập signal Qt khỏi implementation pyserial.
+- Singleton được bảo vệ bằng lock; serial handle được thay thế/đóng theo ownership rõ ràng.
+- Mỗi yêu cầu connect có generation token: disconnect hoặc connect mới sẽ hủy kết quả connect cũ.
+- Retry chỉ áp dụng cho lỗi truy cập port và chạy trong worker, không giữ lock trong lúc sleep/open port.
+- Read/write timeout hữu hạn; port, baud và payload được kiểm tra chủ động.
 
 ## Data Flow
 
-1. Dialog cấu hình → `HardwareManager.connect_hardware()`.
-2. Manager → singleton `HardwareConnector` → `serial.Serial`.
-3. Kết quả kết nối phát signal về status bar; command motor được encode UTF-8 và ghi ra port.
-
+1. Dialog/MainViewModel gửi connect hoặc scan vào `FunctionWorker`.
+2. `HardwareManager` gọi `HardwareConnector`.
+3. Connector trả `(success, message)` và Manager phát `connection_status_changed`.
+4. Motor command đi từ ViewModel → `ControlPanelManager` → `HardwareManager` → serial.

@@ -3,7 +3,6 @@ import os
 import sys
 from PyQt6.QtWidgets import QMenu, QStyle, QMessageBox
 from PyQt6.QtGui import QAction, QKeySequence, QIcon
-from App.Presentation.Views.Dialog.MotorControlDialog import MotorControlDialog
 from App.Infrastructure.Helpers.ResourceHelper import resource_path
 
 class MenuControl(QMenu):
@@ -53,6 +52,8 @@ class MenuControl(QMenu):
         # self.addAction(act_file_editor)
 
     def on_motor_control(self):
+        from App.Presentation.Views.Dialog.MotorControlDialog import MotorControlDialog
+
         control_manager = self.parent_window.view_model.control_panel_manager
         dialog = MotorControlDialog(control_manager, self.parent_window)
         dialog.exec()

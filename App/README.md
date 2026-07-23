@@ -2,25 +2,30 @@
 
 ## Project Overview
 
-Package production của VCA Optima. Thư mục này gom toàn bộ mã ứng dụng và giữ ranh giới giữa giao diện, nghiệp vụ, hạ tầng và tài nguyên đóng gói.
+`App` là package chính của VCA Optima Release 1.1.0. Mã nguồn được tổ chức theo hướng MVVM: giao diện PyQt6 ở `Presentation`, nghiệp vụ và thiết bị ở `Models`, lưu trữ và xử lý lỗi ở `Infrastructure`, còn tài nguyên đóng gói nằm trong `ReSource`.
+
+Ứng dụng ưu tiên UI responsive: I/O, camera, serial, ghi media và phân tích ảnh chạy ngoài UI thread; các feature nặng được lazy import sau khi cửa sổ chính đã hiển thị.
 
 ## Annotated Directory Structure
 
-- `Presentation/` — Views và ViewModels PyQt6.
-- `Models/` — quản lý project/session, camera, media, serial và phân tích giọt.
-- `Infrastructure/` — repositories SQLite và helper đường dẫn tài nguyên.
+- `Presentation/` — Views, ViewModels, worker và signal/slot điều phối UI.
+- `Models/` — project/session, camera, serial, media và thuật toán phân tích giọt.
+- `Infrastructure/` — SQLite repositories, đường dẫn dữ liệu, resource helper và crash handler.
 - `ReSource/` — QSS, SVG, ICO và splash screen.
-- `__init__.py` — đánh dấu `App` là Python package.
+- `__init__.py` — package marker.
 
 ## Core Algorithms & Implementation
 
-- Kiến trúc gần MVVM: View chỉ hiển thị/thu sự kiện; ViewModel điều phối signal và manager; Model thực hiện nghiệp vụ; Repository cô lập SQLite.
-- Các tác vụ blocking được tách khỏi UI bằng `QThread` cho camera, ghi video và thao tác file.
-- Đường dẫn tài nguyên được giải quyết thống nhất cho cả source tree và bundle PyInstaller.
+- `FunctionWorker`, các worker chuyên biệt và Qt queued signals đưa tác vụ blocking ra khỏi UI thread.
+- Camera, recorder, filesystem scanner và editor sử dụng cooperative shutdown; `finished` kết hợp `deleteLater()` để giải phóng đúng vòng đời.
+- OpenCV, NumPy, Matplotlib và các editor nặng chỉ được import khi feature tương ứng được mở.
+- File text được ghi nguyên tử; SQLite dùng context manager; đường dẫn và tên tài nguyên được kiểm tra trước thao tác phá hủy.
+- `CrashHandler` ghi rotating log, cài exception hook cho main/background thread và bật `faulthandler`.
 
 ## Data Flow
 
-1. `main.py` import `MainViewModel` và `MainView` từ package này.
-2. `MainViewModel` khởi tạo manager/repository rồi phát signal cho `MainView`.
-3. Views nhận dữ liệu đã xử lý, còn Models ghi filesystem, SQLite hoặc thiết bị ngoại vi.
-
+1. `main.py` cài crash handler, tạo Qt shell và lazy-load `MainViewModel`/`MainView`.
+2. View phát sự kiện → ViewModel kiểm tra đầu vào → Model hoặc worker thực hiện nghiệp vụ.
+3. Worker trả kết quả bằng signal về UI thread.
+4. Capture/record thành công phát `media_created` → SideBar cập nhật ngay; `QFileSystemWatcher` vẫn đồng bộ thay đổi từ bên ngoài.
+5. Khi đóng, editor chờ worker hoàn tất theo tín hiệu, sau đó giải phóng camera, serial, multimedia, Matplotlib và lưu session.

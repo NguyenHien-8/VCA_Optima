@@ -1,9 +1,12 @@
 # App/Models/Vision/CameraFrameDispatcher.py
-from PyQt6.QtCore import QObject, pyqtSlot
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QImage
+from App.Infrastructure.CrashHandler import log_exception
 
 
 class CameraFrameDispatcher(QObject):
+    dispatch_error = pyqtSignal(str)
+
     def __init__(self, camera_manager):
         super().__init__()
         self._camera_manager = camera_manager
@@ -16,9 +19,24 @@ class CameraFrameDispatcher(QObject):
     def _on_camera_frame(self, qimage: QImage):
         self._last_frame = qimage
         if self._active_view_model is not None:
-            self._active_view_model.receive_frame(qimage)
+            self._deliver_frame(self._active_view_model, qimage)
 
     def set_active_view_model(self, view_model):
+        if view_model is not None and not callable(
+            getattr(view_model, "receive_frame", None)
+        ):
+            self.dispatch_error.emit(
+                "The active editor cannot receive camera frames."
+            )
+            view_model = None
         self._active_view_model = view_model
         if self._active_view_model is not None and self._last_frame is not None:
-            self._active_view_model.receive_frame(self._last_frame)
+            self._deliver_frame(self._active_view_model, self._last_frame)
+
+    def _deliver_frame(self, view_model, image):
+        try:
+            view_model.receive_frame(image)
+        except Exception as exc:
+            log_exception("Camera frame delivery failed")
+            self._active_view_model = None
+            self.dispatch_error.emit(f"Camera frame dispatch stopped: {exc}")
