@@ -1,0 +1,14 @@
+../Core/Src/MainApp.cpp:44:6:void Send_To_PC(const char*)	24	static
+../Core/Src/MainApp.cpp:54:6:void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef*)	16	static
+../Core/Src/MainApp.cpp:62:6:bool Is_Direction_CW()	4	static
+../Core/Src/MainApp.cpp:67:6:void HAL_GPIO_EXTI_Callback(uint16_t)	24	static
+../Core/Src/MainApp.cpp:104:6:void App_USB_Data_Rx_Handler(uint8_t*, uint32_t)	24	static
+../Core/Src/MainApp.cpp:125:6:void Reset_Command_State()	8	static
+../Core/Src/MainApp.cpp:132:6:bool Is_Safety_Move(bool)	16	static
+../Core/Src/MainApp.cpp:146:6:void Process_Serial_Command()	168	static
+../Core/Src/MainApp.cpp:229:6:void App_Setup()	24	static
+../Core/Src/MainApp.cpp:240:6:void App_Loop()	48	static
+../Core/Src/MainApp.cpp:261:1:void __static_initialization_and_destruction_0()	8	static
+../Core/Src/MainApp.cpp:261:1:void __static_initialization_and_destruction_1()	8	static
+../Core/Src/MainApp.cpp:261:1:cpp)	8	static
+../Core/Src/MainApp.cpp:261:1:cpp)	8	static
