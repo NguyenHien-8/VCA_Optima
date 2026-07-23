@@ -90,6 +90,7 @@ class MainView(QMainWindow):
         self.resize(1000, 700)
 
         self.view_model = view_model or MainViewModel()
+        self.camera_dispatcher = self.view_model.get_camera_dispatcher()
 
         self.sidebar = ProjectSidebar(self)
         self.sidebar.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable |
@@ -124,7 +125,6 @@ class MainView(QMainWindow):
         self.pending_rename_item = None
 
         self.view_model.restore_session()
-        self.camera_dispatcher = self.view_model.get_camera_dispatcher()
 
         expanded_paths = self.view_model.get_expanded_paths()
         self.sidebar.restore_expanded_paths(expanded_paths)
