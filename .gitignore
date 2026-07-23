@@ -12,6 +12,8 @@ dist/
 *.pyc
 *.pyo
 *.db
+ConfigStorage.db
+SessionData.db
 
 # Virtual environment
 venv/
