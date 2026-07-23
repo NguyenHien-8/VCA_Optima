@@ -1,12 +1,11 @@
 # App/Presentation/Views/Dialog/ConfigHardwareDialog.py
-import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QLineEdit, QPushButton, QStyle,
                              QFrame, QSpacerItem, QSizePolicy, QMessageBox)
 from PyQt6.QtCore import Qt
 
 from App.Presentation.ViewModels.DialogViewModel.ConfigHardwareViewModel import ConfigHardwareViewModel
-from App.Infrastructure.Helpers.ResourceHelper import resource_path
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
 
 class ConfigHardwareDialog(QDialog):
     def __init__(self, hardware_manager, parent=None):
@@ -26,12 +25,7 @@ class ConfigHardwareDialog(QDialog):
         self.load_current_settings()
 
     def load_hardware_dialog_style(self):
-        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "HardwareDialogStyles.qss"))
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        else:
-            print(f"Warning: Stylesheet not found at {qss_path}")
+        apply_stylesheet(self, "HardwareDialogStyles.qss")
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)

@@ -18,7 +18,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Arc, FancyArrowPatch
 
 from App.Models.Analysis.AnalysisManager import AnalysisManager
-from App.Infrastructure.Helpers.ResourceHelper import resource_path
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet, resource_path
 
 
 class DropletAnalysisWindow(QMainWindow):
@@ -393,15 +393,7 @@ class DropletAnalysisWindow(QMainWindow):
         self.ax = None
 
     def load_style(self):
-        qss_path = resource_path(os.path.join(
-            "App", "ReSource", "Styles", "DropletAnalysisStyles.qss"
-        ))
-        if os.path.exists(qss_path):
-            try:
-                with open(qss_path, "r", encoding="utf-8") as f:
-                    self.setStyleSheet(f.read())
-            except Exception as e:
-                print(f"Warning: Could not load stylesheet: {e}")
+        apply_stylesheet(self, "DropletAnalysisStyles.qss")
 
     # =========================
     # slots

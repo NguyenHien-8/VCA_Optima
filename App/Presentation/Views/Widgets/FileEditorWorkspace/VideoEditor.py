@@ -10,7 +10,7 @@ from PyQt6.QtGui import QIcon, QCloseEvent, QPixmap, QImage, QPainter, QFont, QC
 from PyQt6.QtMultimedia import QMediaPlayer, QVideoFrame
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
-from App.Infrastructure.Helpers.ResourceHelper import resource_path
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet, resource_path
 
 
 class VideoEditor(QWidget):
@@ -40,12 +40,7 @@ class VideoEditor(QWidget):
             self.load_video(file_path)
 
     def load_style(self):
-        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "VideoEditorStyles.qss"))
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        else:
-            print("Warning: VideoEditorStyles.qss not found")
+        apply_stylesheet(self, "VideoEditorStyles.qss")
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)

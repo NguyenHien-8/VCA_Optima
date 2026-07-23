@@ -3,6 +3,8 @@ import os
 from PyQt6.QtWidgets import (QTabWidget, QWidget, QLabel, QStackedLayout, QTabBar)
 from PyQt6.QtCore import pyqtSignal, Qt, QMimeData
 
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
+
 class EditorTabBar(QTabBar):
     """
     Custom TabBar for smoother tab drag-and-drop functionality (Live Reordering).
@@ -79,13 +81,7 @@ class EditorWorkspace(QWidget):
         self.load_editor_workspace_style()
 
     def load_editor_workspace_style(self):
-        from App.Infrastructure.Helpers.ResourceHelper import resource_path
-        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "EditorWorkspaceStyles.qss"))
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        else:
-            print(f"Warning: Stylesheet not found at {qss_path}")
+        apply_stylesheet(self, "EditorWorkspaceStyles.qss")
 
     # --- DRAG & DROP EVENTS ---
     def dragEnterEvent(self, event):

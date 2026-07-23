@@ -1,9 +1,9 @@
 # App/Presentation/Views/Dialog/DeleteResourcesDialog.py
-import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QGridLayout, QLabel,
                              QCheckBox, QPushButton, QHBoxLayout, QWidget)
-from PyQt6.QtCore import Qt, QFile
+from PyQt6.QtCore import Qt
 
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
 from App.Presentation.ViewModels.DialogViewModel.DeleteResourcesViewModel import DeleteResourcesViewModel
 
 class DeleteResourcesDialog(QDialog):
@@ -85,18 +85,7 @@ class DeleteResourcesDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
     def load_deldialog_style(self):
-        qss_path = "App/ReSource/Styles/DelSaveDialogStyles.qss"
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        else:
-            print(f"Warning: Stylesheet not found at {qss_path}")
-        
-        qss_file = QFile(qss_path)
-        if qss_file.open(QFile.OpenModeFlag.ReadOnly | QFile.OpenModeFlag.Text):
-            style = qss_file.readAll().data().decode()
-            self.setStyleSheet(style)
-        qss_file.close()
+        apply_stylesheet(self, "DelSaveDialogStyles.qss")
 
     def is_delete_disk_checked(self):
         return self.view_model.get_delete_disk_checked()

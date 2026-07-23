@@ -17,7 +17,7 @@ from matplotlib.figure import Figure
 
 from App.Presentation.Views.Widgets.DropletAnalysisWindow import DropletAnalysisWindow
 from App.Presentation.ViewModels.FeatureViewModel.DropletAnalysisViewModel import DropletAnalysisViewModel
-from App.Infrastructure.Helpers.ResourceHelper import resource_path
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet, resource_path
 
 
 class ImageEditor(QWidget):
@@ -51,10 +51,7 @@ class ImageEditor(QWidget):
         self.droplet_windows = []
 
     def load_style(self):
-        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "ImageEditorStyles.qss"))
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
+        apply_stylesheet(self, "ImageEditorStyles.qss")
 
     def setup_ui(self):
         # Use QVBoxLayout: canvas on top, control panel below

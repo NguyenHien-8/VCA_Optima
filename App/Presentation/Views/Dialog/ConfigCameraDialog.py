@@ -1,4 +1,3 @@
-import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QPushButton, QMessageBox, QFrame,
                              QSizePolicy, QStyle, QSpacerItem)
@@ -6,7 +5,7 @@ from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtGui import QImage, QPixmap, QPainter, QPainterPath
 
 from App.Presentation.ViewModels.DialogViewModel.ConfigCameraViewModel import ConfigCameraViewModel
-from App.Infrastructure.Helpers.ResourceHelper import resource_path
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
 
 class ConfigCameraDialog(QDialog):
     def __init__(self, camera_manager, parent=None, has_open_editors=False):
@@ -23,12 +22,7 @@ class ConfigCameraDialog(QDialog):
         self.view_model.scan_cameras()
 
     def load_camera_dialog_style(self):
-        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "CameraDialogStyles.qss"))
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        else:
-            print(f"Warning: Stylesheet not found at {qss_path}")
+        apply_stylesheet(self, "CameraDialogStyles.qss")
 
     def _connect_view_model_signals(self):
         self.view_model.camera_list_updated.connect(self.update_camera_list)

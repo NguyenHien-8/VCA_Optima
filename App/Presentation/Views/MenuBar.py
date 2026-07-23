@@ -1,7 +1,7 @@
 # App/Presentation/Views/Widgets/MenuBar/MenuBar.py
-import os
 from PyQt6.QtWidgets import QMenuBar
 
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
 from App.Presentation.Views.Widgets.MenuBar.MenuFile import MenuFile
 from App.Presentation.Views.Widgets.MenuBar.MenuSetup import MenuSetup
 from App.Presentation.Views.Widgets.MenuBar.MenuControl import MenuControl
@@ -18,13 +18,7 @@ class MenuBar(QMenuBar):
         self.setup_structure()
 
     def load_menubar_style(self):
-        from App.Infrastructure.Helpers.ResourceHelper import resource_path
-        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "MenuBarStyles.qss"))
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        else:
-            print(f"Warning: Stylesheet not found at {qss_path}")
+        apply_stylesheet(self, "MenuBarStyles.qss")
 
     def setup_structure(self):
         # --- TOGGLE SIDEBAR ACTION ---

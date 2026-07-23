@@ -1,30 +1,33 @@
-# Run Commands
+# TNH Optima 1.1.0 — Run Commands
 
-## Create venv
+## Chạy source
+
+Từ thư mục repository `VCA_Optima` với virtual environment đã kích hoạt:
+
+```powershell
+python .\Release_1.1.0\main.py
 ```
+
+Hoặc chuyển vào đúng release trước khi chạy:
+
+```powershell
+Set-Location .\Release_1.1.0
+python .\main.py
+```
+
+## Tạo virtual environment
+
+```powershell
 python -m venv venv
-```
-
-## Activate venv
-```
 .\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r .\Release_1.1.0\requirements.txt
 ```
 
-## Setup Library
-```
-pip install -r requirements.txt
-```
+## Đóng gói PyInstaller
 
-# Install <TNH_Optima>.spec
-```
-pyinstaller --clean --noconfirm TNH_Optima.spec
-```
+Chạy trong thư mục `Release_1.1.0`:
 
-# Other Commands
-```
-pip install pyinstaller
-pip install --upgrade pip
-pip install -r requirements.txt
-python -m venv venv  
-.venv\Scripts\activate
+```powershell
+python -m PyInstaller --clean --noconfirm .\TNH_Optima.spec
 ```

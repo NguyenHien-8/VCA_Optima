@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QWidget,
 from PyQt6.QtCore import Qt, pyqtSlot, QFileInfo, QTimer, QPoint
 from PyQt6.QtGui import QCloseEvent
 
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
 from App.Presentation.ViewModels.MainViewModel import MainViewModel
 from App.Presentation.Views.MenuBar import MenuBar
 from App.Presentation.Views.Widgets.SideBar import ProjectSidebar
@@ -83,12 +84,12 @@ class FileEditorWindow(QMainWindow):
 
 
 class MainView(QMainWindow):
-    def __init__(self):
+    def __init__(self, view_model=None):
         super().__init__()
         self.setWindowTitle("TNH Optima")
         self.resize(1000, 700)
 
-        self.view_model = MainViewModel()
+        self.view_model = view_model or MainViewModel()
 
         self.sidebar = ProjectSidebar(self)
         self.sidebar.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable |
@@ -232,13 +233,7 @@ class MainView(QMainWindow):
         main_layout.addWidget(self.editor_workspace)
 
     def load_mainview_style(self):
-        from App.Infrastructure.Helpers.ResourceHelper import resource_path
-        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "MainViewStyles.qss"))
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        else:
-            print(f"Warning: Stylesheet not found at {qss_path}")
+        apply_stylesheet(self, "MainViewStyles.qss")
 
     def connect_signals(self):
         self.editor_workspace.sig_request_open_file.connect(self.on_open_file_requested)

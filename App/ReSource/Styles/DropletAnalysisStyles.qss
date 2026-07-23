@@ -1,0 +1,95 @@
+/* App/ReSource/Styles/DropletAnalysisStyles.qss */
+
+#DropletAnalysisWindow {
+    background-color: #F3F3F3;
+    color: #202124;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+}
+
+#DropletAnalysisWindow QGroupBox {
+    background-color: #FAFAFA;
+    border: 1px solid #B8B8B8;
+    border-radius: 5px;
+    font-weight: 600;
+    margin-top: 10px;
+    padding: 12px 8px 8px 8px;
+}
+
+#DropletAnalysisWindow QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 0 4px;
+    color: #202124;
+}
+
+#DropletAnalysisWindow QPushButton {
+    min-height: 28px;
+    background-color: #FFFFFF;
+    border: 1px solid #9A9A9A;
+    border-radius: 4px;
+    color: #202124;
+    padding: 4px 10px;
+}
+
+#DropletAnalysisWindow QPushButton:hover {
+    background-color: #EEF4FF;
+    border-color: #4F78B8;
+}
+
+#DropletAnalysisWindow QPushButton:pressed,
+#DropletAnalysisWindow QPushButton:checked {
+    background-color: #D9E8FF;
+    border-color: #2F65A7;
+}
+
+#DropletAnalysisWindow QPushButton:disabled {
+    background-color: #E6E6E6;
+    border-color: #C6C6C6;
+    color: #888888;
+}
+
+#DropletAnalysisWindow QComboBox {
+    min-height: 26px;
+    background-color: #FFFFFF;
+    border: 1px solid #9A9A9A;
+    border-radius: 4px;
+    padding: 2px 8px;
+}
+
+#DropletAnalysisWindow QComboBox:hover,
+#DropletAnalysisWindow QComboBox:focus {
+    border-color: #4F78B8;
+}
+
+#DropletAnalysisWindow QComboBox::drop-down {
+    width: 22px;
+    border: none;
+}
+
+#DropletAnalysisWindow QTextEdit {
+    background-color: #FFFFFF;
+    border: 1px solid #B8B8B8;
+    border-radius: 4px;
+    color: #202124;
+    selection-background-color: #D9E8FF;
+    padding: 5px;
+}
+
+#DropletAnalysisWindow QRadioButton {
+    spacing: 7px;
+    color: #202124;
+    padding: 2px;
+}
+
+#DropletAnalysisWindow QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+}
+
+#DropletAnalysisWindow QSplitter::handle {
+    background-color: #D0D0D0;
+    width: 2px;
+    height: 2px;
+}

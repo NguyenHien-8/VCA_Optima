@@ -2,6 +2,7 @@ __pycache__/
 Src_STM32/
 Release_0.1.0/
 Release_1.1.0/
+.agents/
 build/
 Output/
 dist/

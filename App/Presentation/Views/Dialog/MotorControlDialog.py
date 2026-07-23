@@ -1,11 +1,10 @@
 # App/Presentation/Views/Dialog/MotorControlDialog.py
-import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QComboBox, QFrame, QMessageBox)
 from PyQt6.QtCore import Qt
 
 from App.Presentation.ViewModels.DialogViewModel.MotorControlViewModel import MotorControlViewModel
-from App.Infrastructure.Helpers.ResourceHelper import resource_path
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
 
 class MotorControlDialog(QDialog):
     def __init__(self, control_manager, parent=None):
@@ -18,12 +17,7 @@ class MotorControlDialog(QDialog):
         self.load_motor_dialog_style()
 
     def load_motor_dialog_style(self):
-        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "MotorControlDialog.qss"))
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        else:
-            print(f"Warning: Stylesheet not found at {qss_path}")
+        apply_stylesheet(self, "MotorControlDialog.qss")
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)

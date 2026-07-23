@@ -1,9 +1,9 @@
 # App/Presentation/Views/Widgets/FileEditorWorkspace/FileEditor.py
-import os
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QMessageBox, QSizePolicy
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtGui import QImage, QPixmap
 
+from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
 from App.Presentation.Views.Widgets.FileEditorWorkspace.MotorControlEditor import MotorControlEditor
 from App.Presentation.Views.Widgets.FileEditorWorkspace.MediaControlEditor import MediaControlEditor
 
@@ -25,14 +25,7 @@ class FileEditor(QWidget):
         self.load_file_editor_style()
 
     def load_file_editor_style(self):
-        from App.Infrastructure.Helpers.ResourceHelper import resource_path
-        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "FileEditorStyles.qss"))
-
-        if os.path.exists(qss_path):
-            with open(qss_path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        else:
-            print(f"Warning: Stylesheet not found at {qss_path}")
+        apply_stylesheet(self, "FileEditorStyles.qss")
 
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
