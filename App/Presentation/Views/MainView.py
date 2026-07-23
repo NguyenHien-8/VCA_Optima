@@ -1,0 +1,825 @@
+import os
+from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QWidget,
+                             QFileDialog, QInputDialog, QMessageBox, QDialog,
+                             QStatusBar, QDockWidget, QTextEdit, QMenu)
+from PyQt6.QtCore import Qt, pyqtSlot, QFileInfo, QTimer, QPoint
+from PyQt6.QtGui import QCloseEvent
+
+from App.Presentation.ViewModels.MainViewModel import MainViewModel
+from App.Presentation.Views.MenuBar import MenuBar
+from App.Presentation.Views.Widgets.SideBar import ProjectSidebar
+from App.Presentation.Views.Widgets.StatusBar import StatusBar
+from App.Presentation.Views.Widgets.EditorWorkspace import EditorWorkspace
+from App.Presentation.Views.Dialog.DeleteResourcesDialog import DeleteResourcesDialog
+from App.Presentation.Views.Dialog.SaveResourcesDialog import SaveResourcesDialog
+from App.Presentation.Views.Widgets.FileEditorWorkspace.FileEditor import FileEditor
+from App.Presentation.ViewModels.FeatureViewModel.FileEditorViewModel import FileEditorViewModel
+from App.Presentation.Views.Widgets.FileEditorWorkspace.ImageEditor import ImageEditor
+from App.Presentation.ViewModels.FeatureViewModel.ImageEditorViewModel import ImageEditorViewModel
+from App.Presentation.Views.Widgets.FileEditorWorkspace.VideoEditor import VideoEditor
+
+
+class FileEditorWindow(QMainWindow):
+    """
+    Standalone window for FileEditor.
+    Uses QMainWindow so the OS window has minimize / maximize / close / resize.
+    """
+    def __init__(self, main_view, editor_widget, view_model):
+        super().__init__(main_view)
+        self.main_view = main_view
+        self.editor_widget = editor_widget
+        self.view_model = view_model
+        self._opened = False
+
+        self.setWindowTitle("FileEditor")
+        self.resize(1100, 720)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setCentralWidget(self.editor_widget)
+        self._apply_window_title()
+
+        if hasattr(self.view_model, "storage_target_changed"):
+            self.view_model.storage_target_changed.connect(self._on_storage_target_changed)
+
+    def _apply_window_title(self):
+        project_name = getattr(self.view_model, "project_name", "")
+        item_name = getattr(self.view_model, "item_name", "")
+        if project_name and item_name:
+            self.setWindowTitle(f"FileEditor - {project_name}/{item_name}")
+        elif item_name:
+            self.setWindowTitle(f"FileEditor - {item_name}")
+        else:
+            self.setWindowTitle("FileEditor")
+
+    @pyqtSlot(str, str, str)
+    def _on_storage_target_changed(self, project_name, item_name, item_path):
+        self._apply_window_title()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._opened:
+            self._opened = True
+            self.main_view.view_model.on_editor_opened()
+        self.main_view.camera_dispatcher.set_active_view_model(self.view_model)
+
+    def closeEvent(self, event):
+        try:
+            active_vm = self.main_view.camera_dispatcher._active_view_model
+            if active_vm is self.view_model:
+                self.main_view.camera_dispatcher.set_active_view_model(None)
+
+            if hasattr(self.editor_widget, "close_editor"):
+                self.editor_widget.close_editor()
+            elif hasattr(self.view_model, "close"):
+                self.view_model.close()
+
+            if self._opened:
+                self.main_view.view_model.on_editor_closed()
+
+            self.main_view.file_editor_window = None
+            event.accept()
+        except Exception as e:
+            QMessageBox.warning(self, "Close Error", str(e))
+            event.accept()
+
+
+class MainView(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("TNH Optima")
+        self.resize(1000, 700)
+
+        self.view_model = MainViewModel()
+
+        self.sidebar = ProjectSidebar(self)
+        self.sidebar.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable |
+                                 QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                                 QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        self.sidebar.setVisible(True)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.sidebar)
+
+        self.menu_bar_manager = MenuBar(self)
+        self.setMenuBar(self.menu_bar_manager)
+
+        self.system_status_bar = QStatusBar()
+        self.setStatusBar(self.system_status_bar)
+        self.status_bar = StatusBar()
+        self.system_status_bar.addWidget(self.status_bar, 1)
+        self.system_status_bar.setContentsMargins(0, 0, 0, 0)
+        self.camera_info = {}
+
+        self.tab_view_models = {}
+        self.file_editor_window = None
+
+        self.setup_ui()
+        self.editor_workspace.tab_widget.currentChanged.connect(self.on_tab_changed)
+        self.editor_workspace.tab_widget.tabCloseRequested.connect(self.on_tab_close_requested)
+        self._connect_view_model_signals()
+        self.connect_signals()
+
+        self.pending_restore_editors = []
+        self.restoring_in_progress = False
+
+        self.pending_rename_project = None
+        self.pending_rename_item = None
+
+        self.view_model.restore_session()
+        self.camera_dispatcher = self.view_model.get_camera_dispatcher()
+
+        expanded_paths = self.view_model.get_expanded_paths()
+        self.sidebar.restore_expanded_paths(expanded_paths)
+
+        tab_bar = self.editor_workspace.tab_widget.tabBar()
+        tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        tab_bar.customContextMenuRequested.connect(self.on_tab_context_menu)
+
+        self.sidebar.project_tree.itemSelectionChanged.connect(self._on_sidebar_selection_changed)
+
+    def _connect_view_model_signals(self):
+        self.view_model.status_message.connect(self.system_status_bar.showMessage)
+        self.view_model.error_occurred.connect(lambda msg: QMessageBox.critical(self, "Error", msg))
+        self.view_model.project_added.connect(self.sidebar.add_project_item)
+        self.view_model.project_removed.connect(self.sidebar.remove_project_item)
+        self.view_model.project_renamed.connect(self.sidebar.rename_project_item)
+        self.view_model.item_added.connect(self.sidebar.add_structure_item)
+        self.view_model.item_removed.connect(self.sidebar.remove_item_node)
+        self.view_model.item_renamed.connect(self.sidebar.rename_item_node)
+        self.view_model.file_loaded.connect(self._on_file_loaded)
+        self.view_model.camera_error.connect(self.show_error)
+        self.view_model.open_editor_requested.connect(self._on_open_editor_requested)
+        self.view_model.file_renamed.connect(self._on_file_renamed)
+        self.view_model.camera_manager.camera_list_signal.connect(self._on_camera_list_updated)
+
+        self.view_model.request_unwatch_item.connect(self.sidebar.unwatch_item_media)
+        self.view_model.request_unwatch_project.connect(self.sidebar.unwatch_project_media)
+        self.view_model.request_close_editors_for_item.connect(self._close_editors_for_target)
+
+        self.view_model.camera_manager.status_message_signal.connect(self._update_camera_status)
+        self.view_model.camera_manager.error_occurred_signal.connect(self._on_camera_error)
+        self.view_model.hardware_manager.connection_status_changed.connect(self._update_hardware_status)
+
+        self.view_model.request_stop_video_editor.connect(self._stop_video_editor)
+        self.view_model.request_close_editor_for_file.connect(self._close_editor_by_path)
+
+    @pyqtSlot(str, str)
+    def _close_editors_for_target(self, project_name, item_name):
+        tab_widget = self.editor_workspace.tab_widget
+        for i in range(tab_widget.count() - 1, -1, -1):
+            widget = tab_widget.widget(i)
+            p_name = widget.property("project_name")
+            f_path = widget.property("full_path")
+
+            if p_name == project_name:
+                if not item_name:
+                    self._close_tab_safely(i)
+                else:
+                    if f_path:
+                        target_part = os.path.normpath(os.path.join(project_name, item_name))
+                        norm_f_path = os.path.normpath(f_path)
+                        if target_part in norm_f_path:
+                            self._close_tab_safely(i)
+
+    @pyqtSlot(str)
+    def _stop_video_editor(self, full_path):
+        tab_widget = self.editor_workspace.tab_widget
+        for i in range(tab_widget.count()):
+            widget = tab_widget.widget(i)
+            if isinstance(widget, VideoEditor) and widget.property("full_path") == full_path:
+                widget.stop_playback()
+                break
+
+    @pyqtSlot(str)
+    def _close_editor_by_path(self, full_path):
+        norm_target = os.path.normpath(full_path)
+
+        tab_widget = self.editor_workspace.tab_widget
+        for i in range(tab_widget.count()):
+            widget = tab_widget.widget(i)
+            widget_path = widget.property("full_path")
+            if widget_path and os.path.normpath(widget_path) == norm_target:
+                self._close_tab_safely(i)
+                return
+
+    @pyqtSlot(str, str)
+    def _on_open_editor_requested(self, full_path, project_name):
+        project_path = self.view_model.get_project_path(project_name)
+        if not project_path or not full_path.startswith(project_path):
+            QMessageBox.warning(self, "Error", f"Cannot determine relative path for {full_path}")
+            return
+        relative_path = os.path.relpath(full_path, project_path)
+        self.pending_restore_editors.append((project_name, relative_path))
+        if not self.restoring_in_progress:
+            self.restoring_in_progress = True
+            self._process_next_pending_editor()
+
+    def _process_next_pending_editor(self):
+        if not self.pending_restore_editors:
+            self.restoring_in_progress = False
+            return
+        project_name, relative_path = self.pending_restore_editors.pop(0)
+        self.action_open_file_in_editor(project_name, relative_path)
+
+    def setup_ui(self):
+        central_widget = QWidget()
+        central_widget.setObjectName("CentralWidget")
+        self.setCentralWidget(central_widget)
+
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        self.editor_workspace = EditorWorkspace()
+        self.load_mainview_style()
+        main_layout.addWidget(self.editor_workspace)
+
+    def load_mainview_style(self):
+        from App.Infrastructure.Helpers.ResourceHelper import resource_path
+        qss_path = resource_path(os.path.join("App", "ReSource", "Styles", "MainViewStyles.qss"))
+        if os.path.exists(qss_path):
+            with open(qss_path, "r", encoding="utf-8") as f:
+                self.setStyleSheet(f.read())
+        else:
+            print(f"Warning: Stylesheet not found at {qss_path}")
+
+    def connect_signals(self):
+        self.editor_workspace.sig_request_open_file.connect(self.on_open_file_requested)
+        self.editor_workspace.sig_request_save_file.connect(self.view_model.handle_save_file_content)
+
+        sb = self.sidebar
+        sb.sig_new_item.connect(lambda p: self._input_new_item(p))
+        sb.sig_delete.connect(self._confirm_delete_project)
+        sb.sig_rename.connect(self._input_rename_project)
+        sb.sig_save_as.connect(self._select_folder_save_as)
+        sb.sig_import_file.connect(lambda p: self._open_project_dialog())
+        sb.sig_import_item.connect(lambda p: self._open_item_dialog(p))
+        sb.sig_paste_to_project.connect(self.view_model.handle_paste_item)
+        sb.sig_item_copy.connect(self.view_model.handle_copy_item)
+        sb.sig_item_cut.connect(self.view_model.handle_cut_item)
+        sb.sig_item_delete.connect(self._confirm_delete_item)
+        sb.sig_item_rename.connect(self._input_rename_item)
+        sb.sig_open_editor.connect(self.action_open_file_in_editor)
+
+        sb.sig_file_copy.connect(self.view_model.handle_copy_file)
+        sb.sig_file_cut.connect(self.view_model.handle_cut_file)
+        sb.sig_file_rename.connect(self._input_rename_file)
+        sb.sig_file_delete.connect(self._confirm_delete_file)
+        sb.sig_file_paste.connect(self.view_model.handle_paste_file)
+
+    @pyqtSlot(str, str)
+    def on_open_file_requested(self, project_name, relative_path):
+        self.action_open_file_in_editor(project_name, relative_path)
+
+    @pyqtSlot(QPoint)
+    def on_tab_context_menu(self, pos):
+        tab_bar = self.sender()
+        index = tab_bar.tabAt(pos)
+        if index == -1:
+            return
+        widget = self.editor_workspace.tab_widget.widget(index)
+        menu = QMenu(self)
+        act_calib = menu.addAction("Calibration")
+        action = menu.exec(tab_bar.mapToGlobal(pos))
+        if action == act_calib:
+            self.create_calibration_tab_from(widget)
+
+    def create_calibration_tab_from(self, source_widget):
+        project_name = source_widget.property("project_name")
+        if not project_name:
+            project_name = "Unknown"
+        file_name = source_widget.property("file_name")
+        base_name = file_name if file_name else "Image"
+        new_tab_name = f"Calibration-{base_name}"
+
+        view_model = ImageEditorViewModel(project_name=project_name)
+        editor = ImageEditor(view_model)
+        editor.setProperty("project_name", project_name)
+        editor.setProperty("file_name", new_tab_name)
+        editor.setProperty("full_path", None)
+
+        self.editor_workspace.add_editor_tab(editor, new_tab_name, project_name, "")
+
+    def _input_new_item(self, project_name):
+        folder_name, ok = QInputDialog.getText(self, "New Item", f"Create new item in '{project_name}':")
+        if ok and folder_name:
+            self.view_model.handle_new_item(project_name, folder_name)
+
+    def _input_rename_project(self, old_name):
+        self._execute_rename_project(old_name)
+
+    def _execute_rename_project(self, old_name):
+        new_name, ok = QInputDialog.getText(self, "Rename Project", "New Name:", text=old_name)
+        if ok and new_name:
+            self.view_model.handle_rename_project(old_name, new_name)
+
+    def _do_rename_project(self, old_name):
+        new_name, ok = QInputDialog.getText(self, "Rename Project", "New Name:", text=old_name)
+        if ok and new_name:
+            self.view_model.handle_rename_project(old_name, new_name)
+        self.pending_rename_project = None
+
+    def _input_rename_item(self, project_name, old_name):
+        self._execute_rename_item(project_name, old_name)
+
+    def _execute_rename_item(self, project_name, old_name):
+        new_name, ok = QInputDialog.getText(self, "Rename Item", "New Name:", text=old_name)
+        if ok and new_name:
+            self.view_model.handle_rename_item(project_name, old_name, new_name)
+
+    def _do_rename_item(self, project_name, old_name):
+        new_name, ok = QInputDialog.getText(self, "Rename Item", "New Name:", text=old_name)
+        if ok and new_name:
+            self.view_model.handle_rename_item(project_name, old_name, new_name)
+        self.pending_rename_item = None
+
+    def _input_rename_file(self, project_name, item_name, media_type, old_name, _):
+        base, ext = os.path.splitext(old_name)
+        new_name, ok = QInputDialog.getText(self, "Rename File", "New name:", text=base)
+        if ok and new_name:
+            if not os.path.splitext(new_name)[1]:
+                new_name = new_name + ext
+            self.view_model.handle_rename_file(project_name, item_name, media_type, old_name, new_name)
+
+    def _confirm_delete_project(self, project_name):
+        is_temp = self.view_model.is_project_temp(project_name)
+        full_path = self.view_model.get_project_path(project_name)
+        if is_temp:
+            dlg = SaveResourcesDialog(
+                self,
+                item_name=project_name,
+            )
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                action = dlg.get_action()
+                if action == "SAVE":
+                    folder = QFileDialog.getExistingDirectory(self, "Choose a folder to save the project")
+                    if folder:
+                        self.view_model.handle_save_as_project(project_name, folder)
+                        self.view_model.handle_delete_project(project_name, False)
+                elif action == "DONT_SAVE":
+                    self.view_model.handle_delete_project(project_name, True)
+            return
+        else:
+            dlg = DeleteResourcesDialog(
+                self, "Delete Project",
+                f"Remove project '{project_name}' from the workspace?",
+                full_path, show_checkbox=True
+            )
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                self.view_model.handle_delete_project(project_name, dlg.is_delete_disk_checked())
+
+    def _confirm_delete_item(self, project_name, folder_name):
+        is_temp = self.view_model.is_project_temp(project_name)
+        full_path = self.view_model.get_item_path(project_name, folder_name)
+        if is_temp:
+            dlg = SaveResourcesDialog(
+                self,
+                item_name=project_name,
+            )
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                action = dlg.get_action()
+                if action == "SAVE":
+                    folder = QFileDialog.getExistingDirectory(self, "Choose a folder to save the project")
+                    if folder:
+                        self.view_model.handle_save_as_project(project_name, folder)
+                        self.view_model.handle_delete_item(project_name, folder_name, True)
+                elif action == "DONT_SAVE":
+                    self.view_model.handle_delete_item(project_name, folder_name, True)
+            return
+        else:
+            dlg = DeleteResourcesDialog(
+                self, "Delete Item",
+                f"Remove item '{folder_name}' from the project '{project_name}'?",
+                full_path, show_checkbox=True
+            )
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                self.view_model.handle_delete_item(project_name, folder_name, dlg.is_delete_disk_checked())
+
+    def _confirm_delete_file(self, project_name, item_name, media_type, file_name):
+        full_path = os.path.join(self.view_model.get_item_path(project_name, item_name), media_type, file_name)
+        dlg = DeleteResourcesDialog(
+            self, "Delete File",
+            f"Delete file '{file_name}'?",
+            full_path, show_checkbox=False
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.view_model.handle_delete_file(project_name, item_name, media_type, file_name)
+
+    def _open_project_dialog(self):
+        folder = QFileDialog.getExistingDirectory(self, "Open Project Directory")
+        if folder:
+            if not self.view_model.project_manager.is_folder_project(folder):
+                QMessageBox.warning(
+                    self,
+                    "Invalid Selection",
+                    "The selected folder is not a valid project."
+                )
+                return
+            else:
+                self.view_model.handle_open_project(folder)
+
+    def _open_item_dialog(self, project_name):
+        folder = QFileDialog.getExistingDirectory(self, f"Open Item for '{project_name}'")
+        if folder:
+            if not self.view_model.project_manager.is_folder_item(folder):
+                QMessageBox.warning(
+                    self,
+                    "Invalid Selection",
+                    "The selected folder is not a valid item."
+                )
+                return
+            else:
+                self.view_model.handle_open_item(project_name, folder)
+
+    def _select_folder_save_as(self, project_name):
+        folder = QFileDialog.getExistingDirectory(self, "Select Directory to Save Project")
+        if folder:
+            self.view_model.handle_save_as_project(project_name, folder)
+
+    def action_open_file_in_editor(self, project_name, relative_path):
+        if project_name is None or project_name not in self.view_model.get_all_project_names():
+            full_path = relative_path
+            project_name = None
+        else:
+            full_path = self.view_model.get_item_path(project_name, relative_path)
+
+        if not full_path or not os.path.exists(full_path):
+            QMessageBox.warning(self, "Error", "File not found.")
+            if self.restoring_in_progress:
+                self._process_next_pending_editor()
+            return
+
+        file_info = QFileInfo(full_path)
+        ext = os.path.splitext(full_path)[1].lower()
+        image_exts = ['.png', '.jpg', '.jpeg', '.bmp', '.gif']
+        video_exts = ['.mp4', '.avi', '.mov', '.mkv', '.flv']
+
+        if ext in video_exts:
+            editor = VideoEditor(full_path, project_name=project_name)
+            editor.setProperty("project_name", project_name)
+            editor.setProperty("file_name", os.path.basename(full_path))
+            editor.setProperty("full_path", full_path)
+            editor.sig_open_video.connect(self.action_open_file_in_editor)
+            self.editor_workspace.add_editor_tab(editor, os.path.basename(full_path), project_name, full_path)
+            self.view_model.on_editor_opened()
+            if self.restoring_in_progress:
+                self._process_next_pending_editor()
+            return
+
+        if ext in image_exts:
+            view_model = ImageEditorViewModel(project_name=project_name, item_name=os.path.basename(relative_path))
+            editor = ImageEditor(view_model)
+            editor.setProperty("project_name", project_name)
+            editor.setProperty("file_name", os.path.basename(full_path))
+            editor.setProperty("full_path", full_path)
+            editor.sig_open_video.connect(self.action_open_file_in_editor)
+            view_model.load_image(full_path)
+            self.editor_workspace.add_editor_tab(editor, os.path.basename(full_path), project_name, full_path)
+            self.view_model.on_editor_opened()
+            if self.restoring_in_progress:
+                self._process_next_pending_editor()
+            return
+
+        if self.editor_workspace.activate_tab_by_path(full_path):
+            if self.restoring_in_progress:
+                self._process_next_pending_editor()
+            return
+
+        if file_info.size() > 5 * 1024 * 1024:
+            resp = QMessageBox.question(
+                self, "Large File",
+                f"File '{file_info.fileName()}' is large (>5MB). Open anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if resp == QMessageBox.StandardButton.No:
+                if self.restoring_in_progress:
+                    self._process_next_pending_editor()
+                return
+
+        self.view_model.load_file_confirmed(full_path, project_name)
+
+    # =========================
+    # FILEEDITOR TARGET ITEM LOGIC
+    # =========================
+    def _get_current_selected_item_context(self):
+        info = self.sidebar.get_current_selection_info()
+        if not info:
+            return None, None, None
+
+        project_name, item_name, item_type = info
+        if item_type != 'ITEM' or not project_name or not item_name:
+            return None, None, None
+
+        item_path = self.view_model.get_item_path(project_name, item_name)
+        if not item_path or not os.path.isdir(item_path):
+            return None, None, None
+
+        return project_name, item_name, item_path
+
+    def _build_file_editor_session_path(self, item_path, item_name):
+        return os.path.join(item_path, f"{item_name}.session")
+
+    @pyqtSlot()
+    def _on_sidebar_selection_changed(self):
+        if self.file_editor_window is None or not self.file_editor_window.isVisible():
+            return
+
+        project_name, item_name, item_path = self._get_current_selected_item_context()
+        if not item_path:
+            return
+
+        self.file_editor_window.view_model.set_storage_target(project_name, item_name, item_path)
+
+    def _create_standalone_file_editor_window(self):
+        if self.file_editor_window is not None and self.file_editor_window.isVisible():
+            self.file_editor_window.raise_()
+            self.file_editor_window.activateWindow()
+            self.camera_dispatcher.set_active_view_model(self.file_editor_window.view_model)
+            return
+
+        project_name, item_name, item_path = self._get_current_selected_item_context()
+        if not item_path:
+            QMessageBox.information(
+                self,
+                "Open File Editor",
+                "Please select an Item in Project Sidebar first."
+            )
+            return
+
+        session_path = self._build_file_editor_session_path(item_path, item_name)
+
+        view_model = FileEditorViewModel(
+            project_name=project_name,
+            file_name=f"{item_name}.session",
+            content="",
+            full_path=session_path,
+            camera_manager=self.view_model.camera_manager,
+            control_panel_manager=self.view_model.control_panel_manager
+        )
+
+        editor_widget = FileEditor(view_model)
+        editor_widget.setProperty("full_path", session_path)
+        editor_widget.setProperty("file_name", f"{item_name}.session")
+        editor_widget.setProperty("project_name", project_name)
+
+        window = FileEditorWindow(self, editor_widget, view_model)
+        self.file_editor_window = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    def open_file_editor_from_menu(self):
+        self._create_standalone_file_editor_window()
+
+    @pyqtSlot(bool, str, str, str, str)
+    def _on_file_loaded(self, success, content, file_name, project_name, full_path):
+        if not success:
+            QMessageBox.warning(self, "Read Error", f"Cannot read file:\n{content}")
+            if self.restoring_in_progress:
+                self._process_next_pending_editor()
+            return
+
+        editor_widget = QTextEdit()
+        editor_widget.setPlainText(content)
+        editor_widget.setReadOnly(False)
+        editor_widget.setObjectName("CodeEditor")
+        editor_widget.setProperty("full_path", full_path)
+        editor_widget.setProperty("file_name", file_name)
+        editor_widget.setProperty("project_name", project_name)
+
+        self.editor_workspace.add_editor_tab(editor_widget, file_name, project_name, full_path)
+        self.view_model.on_editor_opened()
+
+        if self.restoring_in_progress:
+            self._process_next_pending_editor()
+
+    @pyqtSlot(str, str, str, str, str)
+    def _on_file_renamed(self, project_name, item_name, media_type, old_name, new_name):
+        project_path = self.view_model.get_project_path(project_name)
+        if not project_path:
+            return
+
+        if media_type and media_type.strip():
+            old_full_path = os.path.join(project_path, item_name, media_type, old_name)
+            new_full_path = os.path.join(project_path, item_name, media_type, new_name)
+        else:
+            old_full_path = os.path.join(project_path, item_name, old_name)
+            new_full_path = os.path.join(project_path, item_name, new_name)
+
+        tab_widget = self.editor_workspace.tab_widget
+        found_widget = None
+        for i in range(tab_widget.count()):
+            widget = tab_widget.widget(i)
+            if widget.property("full_path") == old_full_path:
+                found_widget = widget
+                tab_widget.setTabText(i, new_name)
+                widget.setProperty("file_name", new_name)
+                widget.setProperty("full_path", new_full_path)
+
+                if widget in self.tab_view_models:
+                    vm = self.tab_view_models[widget]
+                    if hasattr(vm, 'full_path'):
+                        vm.full_path = new_full_path
+                    if hasattr(vm, 'file_name'):
+                        vm.file_name = new_name
+                break
+
+        if found_widget and isinstance(found_widget, VideoEditor):
+            found_widget.reload_video(new_full_path)
+
+    def on_tab_changed(self, index):
+        if index >= 0:
+            widget = self.editor_workspace.tab_widget.widget(index)
+            active_vm = self.tab_view_models.get(widget)
+            QTimer.singleShot(0, lambda: self.camera_dispatcher.set_active_view_model(active_vm))
+        else:
+            self.camera_dispatcher.set_active_view_model(None)
+
+    def on_tab_close_requested(self, index):
+        widget = self.editor_workspace.tab_widget.widget(index)
+        if widget in self.tab_view_models:
+            vm = self.tab_view_models[widget]
+            if self.camera_dispatcher._active_view_model is vm:
+                self.camera_dispatcher.set_active_view_model(None)
+        self._close_tab_safely(index)
+
+    def _close_tab_safely(self, index) -> bool:
+        widget = self.editor_workspace.tab_widget.widget(index)
+        file_name = widget.property("file_name") if hasattr(widget, "property") else None
+
+        if isinstance(widget, VideoEditor):
+            widget.stop_playback()
+            from PyQt6.QtCore import QCoreApplication
+            QCoreApplication.processEvents()
+
+        if isinstance(widget, QTextEdit) and widget.document().isModified():
+            reply = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                f"File '{file_name}' has been modified.\nDo you want to save changes?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                return False
+            if reply == QMessageBox.StandardButton.Save:
+                content = widget.toPlainText()
+                project_name = widget.property("project_name")
+                full_path = widget.property("full_path")
+                self.view_model.handle_save_file_content(content, project_name, file_name, full_path)
+
+        if widget in self.tab_view_models:
+            self.tab_view_models[widget].close()
+            del self.tab_view_models[widget]
+
+        self.view_model.on_editor_closed()
+        self.editor_workspace.close_tab(index)
+        return True
+
+    def _close_all_tabs_safely(self) -> bool:
+        for i in range(self.editor_workspace.tab_widget.count() - 1, -1, -1):
+            if not self._close_tab_safely(i):
+                return False
+        return True
+
+    def closeEvent(self, event: QCloseEvent):
+        editor_list = []
+        tab_widget = self.editor_workspace.tab_widget
+        for i in range(tab_widget.count()):
+            widget = tab_widget.widget(i)
+            full_path = widget.property("full_path")
+            project_name = widget.property("project_name")
+            if full_path and project_name:
+                editor_list.append({"project_name": project_name, "full_path": full_path})
+
+        expanded_paths = self.sidebar.get_expanded_paths()
+
+        if self.file_editor_window is not None:
+            self.file_editor_window.close()
+
+        if not self._close_all_tabs_safely():
+            event.ignore()
+            return
+
+        self.view_model.shutdown_workers()
+        self.view_model.camera_manager.cleanup()
+        self.view_model.save_session_with_editors(editor_list, expanded_paths)
+
+        event.accept()
+
+    def toggle_sidebar(self):
+        self.sidebar.setVisible(not self.sidebar.isVisible())
+
+    def new_project(self):
+        self.view_model.handle_create_project()
+
+    def open_project(self):
+        self._open_project_dialog()
+
+    def save_as_project(self):
+        project_name = self.sidebar.get_current_project()
+        if project_name:
+            self._select_folder_save_as(project_name)
+        else:
+            QMessageBox.warning(self, "Warning", "No project selected.")
+
+    def new_item(self):
+        project_name = self.sidebar.get_current_project()
+        if project_name:
+            self._input_new_item(project_name)
+        else:
+            QMessageBox.warning(self, "Warning", "No project selected.")
+
+    def open_item(self):
+        project_name = self.sidebar.get_current_project()
+        if project_name:
+            self._open_item_dialog(project_name)
+        else:
+            QMessageBox.warning(self, "Warning", "No project selected.")
+
+    def delete_selected(self):
+        info = self.sidebar.get_current_selection_info()
+        if not info or info[0] is None:
+            QMessageBox.warning(self, "Warning", "No item selected.")
+            return
+        project_name, folder_name, item_type = info
+        if item_type == 'PROJECT':
+            self._confirm_delete_project(project_name)
+        elif item_type == 'ITEM':
+            self._confirm_delete_item(project_name, folder_name)
+
+    def rename_selected(self):
+        info = self.sidebar.get_current_selection_info()
+        if not info or info[0] is None:
+            QMessageBox.warning(self, "Warning", "No item selected.")
+            return
+        project_name, folder_name, item_type = info
+        if item_type == 'PROJECT':
+            self._input_rename_project(project_name)
+        elif item_type == 'ITEM':
+            self._input_rename_item(project_name, folder_name)
+
+    def close_current_editor(self):
+        self.editor_workspace.close_current_tab()
+
+    def close_all_editors(self):
+        self._close_all_tabs_safely()
+
+    @pyqtSlot(str)
+    def show_error(self, message):
+        self.system_status_bar.showMessage(f"ERROR: {message}")
+
+    @pyqtSlot(str)
+    def _update_camera_status(self, message):
+        import re
+
+        # Khi đang kết nối camera theo index, nếu đã có cache tên thì hiển thị tên thật ngay
+        if "Connecting Camera" in message:
+            match = re.search(r'Camera\s+(\d+)', message)
+            if match:
+                idx = int(match.group(1))
+                name = self.view_model.camera_manager.get_camera_name(idx)
+                self.status_bar.set_camera_connected(True, name)
+            else:
+                self.status_bar.set_camera_connected(True, "Camera")
+            return
+
+        # Camera acquired mà camera đã active + đã có cache tên
+        if "Camera acquired" in message:
+            active_idx = self.view_model.camera_manager.active_camera_index
+            if active_idx is not None:
+                name = self.view_model.camera_manager.get_camera_name(active_idx)
+                self.status_bar.set_camera_connected(True, name)
+            return
+
+        if "disconnected" in message.lower() or "lost" in message.lower():
+            self.status_bar.set_camera_connected(False)
+
+    @pyqtSlot(str)
+    def _on_camera_error(self, error_message):
+        self.status_bar.set_camera_connected(False)
+
+    @pyqtSlot(bool, str)
+    def _update_hardware_status(self, connected, message):
+        if connected:
+            import re
+            match = re.search(r'(COM\d+|/dev/tty\S+)', message, re.IGNORECASE)
+            if match:
+                port_name = match.group(1)
+            else:
+                port_name = self.view_model.hardware_manager.current_config.get("port", "Unknown")
+            self.status_bar.set_hardware_connected(True, port_name)
+        else:
+            self.status_bar.set_hardware_connected(False)
+
+    @pyqtSlot(list)
+    def _on_camera_list_updated(self, cameras):
+        self.camera_info = {}
+        for cam in cameras:
+            if isinstance(cam, dict) and 'index' in cam:
+                idx = cam['index']
+                name = cam.get('name', f"Camera {idx}")
+                self.camera_info[idx] = name
+
+        # Nếu camera đang active thì refresh lại StatusBar bằng tên thật ngay khi scan xong
+        active_idx = self.view_model.camera_manager.active_camera_index
+        current_thread = self.view_model.camera_manager.current_thread
+        if active_idx is not None and current_thread is not None:
+            cam_name = self.view_model.camera_manager.get_camera_name(active_idx)
+            self.status_bar.set_camera_connected(True, cam_name)

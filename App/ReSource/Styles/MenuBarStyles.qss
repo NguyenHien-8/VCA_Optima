@@ -1,0 +1,55 @@
+/* App/ReSource/Styles/MenuBarStyles.qss */
+
+/* --- MAIN MENU BAR (Top Bar) --- */
+QMenuBar {
+    background-color: #FFFFFF;
+    color: #000000;          
+    border-bottom: 1px solid #CCCCCC;
+    padding: 2px;
+}
+
+QMenuBar::item {
+    background-color: transparent;
+    padding: 6px 10px;
+    color: #000000;
+    border-radius: 4px; 
+}
+
+QMenuBar::item:selected {
+    background-color: #E0E0E0; 
+    color: #000000;
+}
+
+QMenuBar::item:pressed {
+    background-color: #D0D0D0;
+}
+
+/* --- MENU CON (Dropdown) --- */
+QMenu {
+    background-color: #FFFFFF; 
+    color: #000000;
+    border: 1px solid #CCCCCC;
+    padding: 4px;
+    border-radius: 4px; 
+}
+
+QMenu::item {
+    padding: 6px 25px 6px 30px; 
+    border-radius: 3px;
+    margin: 1px 0px;
+}
+
+QMenu::item:selected {
+    background-color: #CDE6F7; 
+    color: #000000;
+}
+
+QMenu::icon {
+    padding-left: 10px;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: #E0E0E0;
+    margin: 4px 10px;
+}

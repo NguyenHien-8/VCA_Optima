@@ -1,0 +1,19 @@
+__pycache__/
+Src_STM32/
+Release_0.1.0/
+Release_1.1.0/
+build/
+Output/
+dist/
+*.rar
+*.zip
+*.exe
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+.env/
+
+# Optional
+*.mp4

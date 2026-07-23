@@ -1,0 +1,66 @@
+/* App/ReSource/Styles/ImageEditorStyles.qss */
+
+/* =========================================================
+    MAIN IMAGE EDITOR STYLES
+   ========================================================= */
+#ImageEditor {
+    background-color: #F3F3F3;   
+    border: 2px solid #bcbcbc;   
+    padding: 0px;                
+}
+
+/* =========================================================
+    COMMON WIDGETS
+   ========================================================= */
+QLabel { 
+    font-size: 14px; 
+    color: #000000; 
+    font-family: Arial, sans-serif;
+}
+
+QGroupBox {
+    font-weight: bold;
+    border: 1px solid #A0A0A0;
+    border-radius: 4px;
+    margin-top: 6px;
+    padding-top: 10px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 3px 0 3px;
+}
+
+/* =========================================================
+    BUTTON STYLES
+   ========================================================= */
+
+/* --- Generic Button --- */
+QPushButton {
+    background-color: #FFFFFF;
+    border: 1px solid #A0A0A0;
+    border-radius: 4px;
+    padding: 6px 16px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+    color: #000000;
+}
+QPushButton:hover { background-color: #F0F0F0; }
+QPushButton:pressed { background-color: #D0D0D0; }
+
+/* --- Media Button Style --- */
+QPushButton#MediaBtn {
+    background-color: #E1E1E1;
+    border: 2px solid #A0A0A0;
+    border-radius: 6px;
+    padding: 4px; 
+}
+QPushButton#MediaBtn:hover { 
+    background-color: #F5F5F5; 
+    border: 1px solid #7A7A7A;
+}
+QPushButton#MediaBtn:pressed { 
+    background-color: #D0D0D0; 
+    border: 1px solid #505050;
+}

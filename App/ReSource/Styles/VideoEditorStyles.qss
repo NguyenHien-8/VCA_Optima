@@ -1,0 +1,142 @@
+/* App/ReSource/Styles/VideoEditorStyles.qss */
+
+/* === Main Container === */
+#VideoEditor {
+    background-color: #1e1e1e;
+}
+
+/* === Control Panel === */
+#ControlPanel {
+    background-color: #252526;
+    border-top: 1px solid #3e3e42;
+}
+
+/* === Labels === */
+QLabel {
+    color: #cccccc;
+    font-family: "Segoe UI", "Arial", sans-serif;
+    font-size: 13px;
+}
+
+#TimeLabel {
+    color: #eeeeee;
+    font-family: "Consolas", "Courier New", monospace;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+#SpeedLabel {
+    color: #aaaaaa;
+    margin-right: 5px;
+}
+
+/* === Slider (Timeline) === */
+QSlider::groove:horizontal {
+    border: 1px solid #3e3e42;
+    height: 6px;
+    background: #333333;
+    margin: 2px 0;
+    border-radius: 3px;
+}
+
+/* Progress */
+QSlider::sub-page:horizontal {
+    background: #3daee9;
+    border-radius: 3px;
+}
+
+/* Pull button (Handle) */
+QSlider::handle:horizontal {
+    background: #ffffff;
+    border: 1px solid #3daee9;
+    width: 14px;
+    height: 14px;
+    margin: -5px 0; /* Align the handle in the center of the groove */
+    border-radius: 7px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #3daee9; /* Changes color when hovered over */
+    transform: scale(1.2);
+}
+
+/* === Buttons === */
+#MediaBtn {
+    background-color: transparent;
+    border: none;
+    border-radius: 5px;
+    padding: 4px;
+}
+
+#MediaBtn:hover {
+    background-color: #3e3e42; /* Slight hover effect */
+}
+
+#MediaBtn:pressed {
+    background-color: #007acc; /* Blue when pressed */
+    border: 1px solid #005a9e;
+}
+
+/* Button Play */
+#PlayBtn {
+    border: 1px solid #444;
+    background-color: #333;
+    border-radius: 24px;
+}
+#PlayBtn:hover {
+    background-color: #444;
+    border-color: #555;
+}
+#PlayBtn:pressed {
+    background-color: #007acc;
+    border-color: #007acc;
+}
+
+/* === ComboBox (Speed) === */
+QComboBox {
+    background-color: #333333;
+    color: #eeeeee;
+    border: 1px solid #444444;
+    border-radius: 4px;
+    padding: 2px 10px;
+    min-height: 20px;
+}
+
+QComboBox:hover {
+    border: 1px solid #007acc;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left-width: 0px;
+    border-top-right-radius: 3px;
+    border-bottom-right-radius: 3px;
+}
+
+/* Create a down arrow using pure CSS (no image icon needed) */
+QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #cccccc;
+    margin-right: 4px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #252526;
+    color: #eeeeee;
+    selection-background-color: #007acc;
+    selection-color: white;
+    border: 1px solid #3e3e42;
+    outline: none;
+}
+
+/* === Tooltip === */
+QToolTip {
+    background-color: #252526;
+    color: #f0f0f0;
+    border: 1px solid #767676;
+    padding: 4px;
+}

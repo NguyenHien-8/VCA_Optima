@@ -1,0 +1,114 @@
+/* App/ReSource/Styles/MotorControlDialog.qss */
+
+QDialog { 
+    background-color: #E6E6E6; 
+}
+
+QLabel { 
+    font-size: 14px; 
+    color: #000000; 
+    font-family: Arial, sans-serif;
+}
+
+/* --- STYLE CHO COMBOBOX --- */
+QComboBox { 
+    background-color: #FFFFFF; 
+    border: 1px solid #7A7A7A; 
+    border-radius: 0px;       
+    padding: 4px 4px 4px 8px;  
+    font-size: 14px;
+    min-height: 20px;
+}
+
+QComboBox QLineEdit {
+    border: none;
+    background: transparent;
+    padding: 0px; 
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px; 
+    background-color: #F0F0F0; 
+    border-left: 1px solid #FFFFFF;   
+    border-top: 1px solid #FFFFFF;    
+    border-right: 1px solid #7A7A7A;  
+    border-bottom: 1px solid #7A7A7A; 
+}
+
+QComboBox::drop-down:on {
+    background-color: #E0E0E0;
+    border-left: 1px solid #7A7A7A;
+    border-top: 1px solid #7A7A7A;
+    border-right: 1px solid #FFFFFF;
+    border-bottom: 1px solid #FFFFFF;
+    padding-top: 1px;
+    padding-left: 1px;
+}
+
+QComboBox::down-arrow {
+    image: none; 
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #000000; 
+    width: 0;
+    height: 0;
+    margin-right: 2px;
+}
+
+/* --- STYLE FOR GENERAL BUTTONS --- */
+QPushButton {
+    background-color: #FFFFFF;
+    border: 1px solid #A0A0A0;
+    border-radius: 4px;
+    padding: 6px 16px;
+    font-size: 14px;
+    font-family: Arial, sans-serif;
+    color: #000000;
+}
+
+QPushButton:hover { 
+    background-color: #F0F0F0; 
+}
+
+QPushButton:pressed { 
+    background-color: #D0D0D0; 
+}
+
+/* --- STYLE FOR CONTROL BUTTONS (UP/DOWN) --- */
+QPushButton#DirectionBtn {
+    background-color: #99B4D1;
+    border: 2px solid #FFFFFF;
+    border-radius: 4px;
+    font-size: 24px;
+    font-weight: bold;
+    padding: 0px;
+}
+
+QPushButton#DirectionBtn:hover {
+    background-color: #AACCFF;
+}
+
+QPushButton#DirectionBtn:pressed {
+    background-color: #7799BB;
+    border: 2px solid #AAAAAA;
+}
+
+/* --- STYLE FOR STOP BUTTON (STOP) --- */
+QPushButton#StopBtn {
+    background-color: #F0F0F0;
+    border: 1px solid #A0A0A0;
+    border-radius: 4px;
+    font-size: 28px;
+    color: #000000;
+    font-weight: bold;
+}
+
+QPushButton#StopBtn:hover {
+    background-color: #FFFFFF;
+}
+
+QPushButton#StopBtn:pressed {
+    background-color: #D0D0D0;
+}

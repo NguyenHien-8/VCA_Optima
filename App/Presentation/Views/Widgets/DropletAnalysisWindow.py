@@ -1,0 +1,1489 @@
+import os
+import numpy as np
+import cv2
+from datetime import datetime
+
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QGroupBox, QSplitter, QRadioButton,
+    QTextEdit, QMessageBox, QButtonGroup, QInputDialog, QComboBox
+)
+from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtGui import QPixmap, QIcon
+
+import matplotlib
+matplotlib.use('Qt5Agg')
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from matplotlib.patches import Arc, FancyArrowPatch
+
+from App.Models.Analysis.AnalysisManager import AnalysisManager
+from App.Infrastructure.Helpers.ResourceHelper import resource_path
+
+
+class DropletAnalysisWindow(QMainWindow):
+    """
+    Enhanced GUI-only version:
+    - Keep original droplet angle calculation algorithm unchanged
+    - Redesign overlay rendering to resemble reference contact-angle images:
+        + original grayscale image as main view
+        + clean baseline
+        + cyan tangent arrows
+        + angle arcs near contact points
+        + soft angle labels
+    - Preserve existing structure / tools / logic flow
+
+    [PATCH 1]
+    - Removed coordinate text rendering for measurement points and baseline points
+    - Preserved all GUI / algorithm / structure / interaction logic
+    - Kept point deletion support by attaching _point_index to point artists directly
+
+    [PATCH 2]
+    - Save Analysis Results no longer opens QFileDialog
+    - Automatically saves image into the current item's Image folder
+    - Supports path resolution from:
+        1) explicit item_path
+        2) explicit source_image_path
+        3) parent.property("full_path")
+    - Auto-generates non-conflicting file names
+
+    [PATCH 3]
+    - Saved image no longer has black border
+    - Only save flow is adjusted; on-screen GUI remains unchanged
+    """
+
+    _instances = []
+    MEASURE_THRESHOLD = 0.02
+
+    def __init__(self, view_model, pixmap, parent=None, source_image_path=None, item_path=None):
+        super().__init__(parent)
+        DropletAnalysisWindow._instances.append(self)
+
+        self.view_model = view_model
+        self.input_pixmap = pixmap
+        self.analysis_manager = AnalysisManager()
+
+        # ===== Auto-save context =====
+        self.source_image_path = source_image_path
+        self.item_path = item_path
+
+        self.setWindowTitle("Droplet Analysis")
+        self.resize(1100, 760)
+        self.setMinimumSize(700, 500)
+
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setObjectName("DropletAnalysisWindow")
+
+        self.view_model.image_loaded.connect(self.on_image_loaded)
+        self.view_model.analysis_completed.connect(self.on_analysis_completed)
+        self.view_model.error_occurred.connect(self.on_error)
+
+        self.default_xlim = (0.0, 5.0)
+        self.default_ylim = (0.0, 3.0)
+        self.xlim = self.default_xlim
+        self.ylim = self.default_ylim
+
+        self.x_bound = (0.0, 5.0)
+        self.y_bound = (0.0, 3.0)
+
+        self.is_panning = False
+        self.pan_start_x = 0.0
+        self.pan_start_y = 0.0
+
+        self.baseline_method = "Double Points"
+        self.analysis_method = "Ellipsoid Fit"
+
+        self.is_measuring = False
+        self.measurement_points = []
+        self.measurement_artists = []
+        self.crosshair_lines = []
+        self.dragging_point_index = -1
+
+        self.is_baseline_mode = False
+        self.baseline_points = []
+        self.baseline_artists = []
+        self.baseline_line = None
+        self.baseline_coeffs = None
+        self.baseline_anchor_points = None
+
+        self.last_analysis_results = None
+        self.tangent_artists = []
+        self.angle_text_artists = []
+        self.show_original = True
+        self.angle_mode = "Two Angles"
+
+        # visual tuning for reference-style overlay
+        self.overlay_cfg = {
+            "baseline_color": "#b2aafa",
+            "baseline_alpha": 0.95,
+            "baseline_width": 2.5,
+
+            "tangent_color": "#1900ff",
+            "tangent_alpha": 0.95,
+            "tangent_width": 3.0,
+
+            "arc_color": "#cfd7ea",
+            "arc_alpha": 0.75,
+            "arc_width": 1.1,
+
+            "label_color": "#1900ff",
+            "label_bbox_face": (0.10, 0.14, 0.18, 0.18),
+            "label_bbox_edge": (0.80, 0.90, 1.00, 0.25),
+
+            "contact_color": "#f8d7da",
+            "contact_edge": "#ffffff",
+            "contact_size": 18,
+
+            "measure_point_color": "#ff5a5a",
+            "baseline_point_color": "#5aa6ff",
+            "crosshair_color": "#7CFFB2",
+        }
+
+        self.setup_ui()
+        self.load_style()
+
+        self.canvas.mpl_connect('scroll_event', self.on_scroll)
+        self.canvas.mpl_connect('button_press_event', self.on_mouse_press)
+        self.canvas.mpl_connect('button_release_event', self.on_mouse_release)
+        self.canvas.mpl_connect('motion_notify_event', self.on_mouse_move)
+
+        if self.view_model.load_image_from_pixmap(self.input_pixmap):
+            self.view_model.perform_analysis()
+
+    # =========================
+    # UI
+    # =========================
+    def setup_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left panel
+        chart_widget = QWidget()
+        chart_layout = QVBoxLayout(chart_widget)
+        chart_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.figure = Figure(figsize=(7, 5), dpi=100, facecolor="#111111")
+        self.canvas = FigureCanvas(self.figure)
+        chart_layout.addWidget(self.canvas)
+
+        btn_layout = QHBoxLayout()
+
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_refresh.clicked.connect(self.on_refresh_clicked)
+        btn_layout.addWidget(self.btn_refresh)
+
+        self.btn_save = QPushButton("Save Analysis Results")
+        self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save.clicked.connect(self.on_save_clicked)
+        btn_layout.addWidget(self.btn_save)
+
+        self.btn_analysis_manually = QPushButton("Analysis Manually")
+        self.btn_analysis_manually.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_analysis_manually.clicked.connect(self.on_analysis_manually_clicked)
+        btn_layout.addWidget(self.btn_analysis_manually)
+
+        self.btn_delete_measure_point = QPushButton("Delete Measure Point")
+        self.btn_delete_measure_point.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_delete_measure_point.clicked.connect(self.on_delete_measure_point_clicked)
+        btn_layout.addWidget(self.btn_delete_measure_point)
+
+        self.cb_angle_mode = QComboBox()
+        self.cb_angle_mode.addItems(["Left Angle", "Right Angle", "Two Angles"])
+        self.cb_angle_mode.setCurrentText("Two Angles")
+        self.cb_angle_mode.currentTextChanged.connect(self.on_angle_mode_changed)
+        btn_layout.addWidget(self.cb_angle_mode)
+
+        btn_layout.addStretch()
+        chart_layout.addLayout(btn_layout)
+
+        splitter.addWidget(chart_widget)
+        splitter.setStretchFactor(0, 3)
+
+        # Right panel
+        info_widget = QWidget()
+        info_layout = QVBoxLayout(info_widget)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+
+        info_group = QGroupBox("Analysis Information")
+        info_group_layout = QVBoxLayout(info_group)
+
+        self.info_text = QTextEdit()
+        self.info_text.setReadOnly(True)
+        self.info_text.setMaximumHeight(250)
+        self.info_text.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #cccccc;
+                border-radius: 6px;
+                padding: 8px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 10pt;
+                background: #fcfcfc;
+            }
+        """)
+        info_group_layout.addWidget(self.info_text)
+        info_layout.addWidget(info_group)
+
+        tool_group = QGroupBox("Tool")
+        tool_group_layout = QVBoxLayout(tool_group)
+        tool_group_layout.setContentsMargins(5, 5, 5, 5)
+        tool_group_layout.setSpacing(0)
+
+        tool_btn_layout = QHBoxLayout()
+        tool_btn_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.btn_actual_size = QPushButton()
+        self.btn_actual_size.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_actual_size.setToolTip("Actual Size")
+        icon_path_actual = resource_path(os.path.join(
+            "App", "ReSource", "Icon", "DropletAnalysisWindow", "actualsize.svg"
+        ))
+        if os.path.exists(icon_path_actual):
+            self.btn_actual_size.setIcon(QIcon(icon_path_actual))
+            self.btn_actual_size.setIconSize(self.btn_actual_size.sizeHint())
+        self.btn_actual_size.setMaximumWidth(40)
+        self.btn_actual_size.setMaximumHeight(40)
+        self.btn_actual_size.clicked.connect(self.on_actual_size_clicked)
+        tool_btn_layout.addWidget(self.btn_actual_size)
+
+        tool_btn_layout.addSpacing(10)
+
+        self.btn_baseline = QPushButton()
+        self.btn_baseline.setCheckable(True)
+        self.btn_baseline.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_baseline.setToolTip("Baseline")
+        icon_path_baseline = resource_path(os.path.join(
+            "App", "ReSource", "Icon", "DropletAnalysisWindow", "baseline.svg"
+        ))
+        if os.path.exists(icon_path_baseline):
+            self.btn_baseline.setIcon(QIcon(icon_path_baseline))
+            self.btn_baseline.setIconSize(self.btn_baseline.sizeHint())
+        self.btn_baseline.setMaximumWidth(40)
+        self.btn_baseline.setMaximumHeight(40)
+        self.btn_baseline.toggled.connect(self.on_baseline_toggled)
+        tool_btn_layout.addWidget(self.btn_baseline)
+
+        tool_btn_layout.addSpacing(10)
+
+        self.btn_measure = QPushButton()
+        self.btn_measure.setCheckable(True)
+        self.btn_measure.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_measure.setToolTip("Measure Point")
+        icon_path_measure = resource_path(os.path.join(
+            "App", "ReSource", "Icon", "DropletAnalysisWindow", "point.svg"
+        ))
+        if os.path.exists(icon_path_measure):
+            self.btn_measure.setIcon(QIcon(icon_path_measure))
+            self.btn_measure.setIconSize(self.btn_measure.sizeHint())
+        self.btn_measure.setMaximumWidth(40)
+        self.btn_measure.setMaximumHeight(40)
+        self.btn_measure.toggled.connect(self.on_measure_toggled)
+        tool_btn_layout.addWidget(self.btn_measure)
+
+        tool_btn_layout.addSpacing(10)
+
+        self.btn_auto_detect = QPushButton()
+        self.btn_auto_detect.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_auto_detect.setToolTip("Auto Detect Edge")
+        icon_path_auto = resource_path(os.path.join(
+            "App", "ReSource", "Icon", "DropletAnalysisWindow", "autodetectedge.svg"
+        ))
+        if os.path.exists(icon_path_auto):
+            self.btn_auto_detect.setIcon(QIcon(icon_path_auto))
+            self.btn_auto_detect.setIconSize(self.btn_auto_detect.sizeHint())
+        self.btn_auto_detect.setMaximumWidth(40)
+        self.btn_auto_detect.setMaximumHeight(40)
+        self.btn_auto_detect.clicked.connect(self.on_auto_detect_clicked)
+        tool_btn_layout.addWidget(self.btn_auto_detect)
+
+        tool_btn_layout.addStretch()
+        tool_group_layout.addLayout(tool_btn_layout)
+        info_layout.addWidget(tool_group)
+
+        config_group = QGroupBox("Display Settings")
+        config_group_layout = QVBoxLayout(config_group)
+
+        self.btn_colormap_viridis = QPushButton("Colormap: Viridis")
+        self.btn_colormap_viridis.setCheckable(True)
+        config_group_layout.addWidget(self.btn_colormap_viridis)
+
+        self.btn_colormap_plasma = QPushButton("Colormap: Plasma")
+        self.btn_colormap_plasma.setCheckable(True)
+        config_group_layout.addWidget(self.btn_colormap_plasma)
+
+        self.btn_colormap_hot = QPushButton("Colormap: Hot")
+        self.btn_colormap_hot.setCheckable(True)
+        config_group_layout.addWidget(self.btn_colormap_hot)
+
+        self.btn_original = QPushButton("Original Image")
+        self.btn_original.setCheckable(True)
+        self.btn_original.setChecked(True)
+        config_group_layout.addWidget(self.btn_original)
+
+        self.display_group = QButtonGroup(self)
+        self.display_group.setExclusive(True)
+        self.display_group.addButton(self.btn_colormap_viridis)
+        self.display_group.addButton(self.btn_colormap_plasma)
+        self.display_group.addButton(self.btn_colormap_hot)
+        self.display_group.addButton(self.btn_original)
+
+        self.btn_colormap_viridis.toggled.connect(self.on_colormap_toggled)
+        self.btn_colormap_plasma.toggled.connect(self.on_colormap_toggled)
+        self.btn_colormap_hot.toggled.connect(self.on_colormap_toggled)
+        self.btn_original.toggled.connect(self.on_original_toggled)
+
+        info_layout.addWidget(config_group)
+
+        baseline_group = QGroupBox("Set Baseline Manually")
+        baseline_layout = QVBoxLayout(baseline_group)
+
+        self.baseline_button_group = QButtonGroup(self)
+
+        self.radio_double = QRadioButton("Double Points")
+        self.radio_double.setChecked(True)
+        self.radio_double.toggled.connect(self.on_baseline_method_changed)
+        baseline_layout.addWidget(self.radio_double)
+        self.baseline_button_group.addButton(self.radio_double)
+
+        self.radio_mirror = QRadioButton("Mirror Image Method")
+        self.radio_mirror.toggled.connect(self.on_baseline_method_changed)
+        baseline_layout.addWidget(self.radio_mirror)
+        self.baseline_button_group.addButton(self.radio_mirror)
+
+        info_layout.addWidget(baseline_group)
+
+        analysis_setup_group = QGroupBox("Droplet Analysis Setup")
+        analysis_setup_layout = QVBoxLayout(analysis_setup_group)
+
+        self.analysis_button_group = QButtonGroup(self)
+
+        self.radio_ellipsoid = QRadioButton("Ellipsoid Fit")
+        self.radio_ellipsoid.setChecked(True)
+        self.radio_ellipsoid.toggled.connect(self.on_analysis_method_changed)
+        analysis_setup_layout.addWidget(self.radio_ellipsoid)
+        self.analysis_button_group.addButton(self.radio_ellipsoid)
+
+        self.radio_young_laplace = QRadioButton("Young-Laplace Fit")
+        self.radio_young_laplace.toggled.connect(self.on_analysis_method_changed)
+        analysis_setup_layout.addWidget(self.radio_young_laplace)
+        self.analysis_button_group.addButton(self.radio_young_laplace)
+
+        info_layout.addWidget(analysis_setup_group)
+        info_layout.addStretch()
+
+        splitter.addWidget(info_widget)
+        splitter.setStretchFactor(1, 1)
+        splitter.setCollapsible(1, False)
+
+        main_layout.addWidget(splitter, stretch=1)
+
+        self.current_colormap = 'viridis'
+        self.colormap_buttons = {
+            'viridis': self.btn_colormap_viridis,
+            'plasma': self.btn_colormap_plasma,
+            'hot': self.btn_colormap_hot
+        }
+
+        self.ax = None
+
+    def load_style(self):
+        qss_path = resource_path(os.path.join(
+            "App", "ReSource", "Styles", "DropletAnalysisStyles.qss"
+        ))
+        if os.path.exists(qss_path):
+            try:
+                with open(qss_path, "r", encoding="utf-8") as f:
+                    self.setStyleSheet(f.read())
+            except Exception as e:
+                print(f"Warning: Could not load stylesheet: {e}")
+
+    # =========================
+    # slots
+    # =========================
+    @pyqtSlot(QPixmap)
+    def on_image_loaded(self, pixmap):
+        self.update_info_text("Image loaded successfully.")
+
+    @pyqtSlot(object)
+    def on_analysis_completed(self, analysis_data):
+        if analysis_data:
+            self.update_display()
+            self.update_analysis_info(analysis_data)
+
+    @pyqtSlot(str)
+    def on_error(self, message):
+        QMessageBox.critical(self, "Analysis Error", message)
+        self.update_info_text(f"Error: {message}")
+
+    # =========================
+    # auto-save path helpers
+    # =========================
+    def _resolve_source_path_from_parent(self):
+        parent = self.parent()
+
+        if parent is not None and hasattr(parent, "property"):
+            full_path = parent.property("full_path")
+            if isinstance(full_path, str) and full_path.strip():
+                return full_path
+
+        temp = parent
+        visited = set()
+        while temp is not None and id(temp) not in visited:
+            visited.add(id(temp))
+            if hasattr(temp, "property"):
+                full_path = temp.property("full_path")
+                if isinstance(full_path, str) and full_path.strip():
+                    return full_path
+            temp = temp.parent()
+
+        return None
+
+    def _resolve_item_path(self):
+        if isinstance(self.item_path, str) and self.item_path.strip():
+            norm_item = os.path.normpath(self.item_path)
+            if os.path.isdir(norm_item):
+                return norm_item
+
+        candidate_source = None
+        if isinstance(self.source_image_path, str) and self.source_image_path.strip():
+            candidate_source = self.source_image_path
+        else:
+            candidate_source = self._resolve_source_path_from_parent()
+
+        if not candidate_source:
+            return None
+
+        candidate_source = os.path.normpath(candidate_source)
+
+        if os.path.isfile(candidate_source):
+            parent_dir = os.path.dirname(candidate_source)
+            parent_name = os.path.basename(parent_dir).lower()
+
+            if parent_name == "image":
+                item_root = os.path.dirname(parent_dir)
+                if os.path.isdir(item_root):
+                    return item_root
+
+            if parent_name == "video":
+                item_root = os.path.dirname(parent_dir)
+                if os.path.isdir(item_root):
+                    return item_root
+
+            if os.path.isdir(parent_dir):
+                return parent_dir
+
+        elif os.path.isdir(candidate_source):
+            return candidate_source
+
+        return None
+
+    def _get_analysis_save_dir(self):
+        item_root = self._resolve_item_path()
+        if not item_root:
+            return None
+
+        image_dir = os.path.join(item_root, "Image")
+        os.makedirs(image_dir, exist_ok=True)
+        return image_dir
+
+    def _get_source_base_name(self):
+        candidate_source = None
+        if isinstance(self.source_image_path, str) and self.source_image_path.strip():
+            candidate_source = self.source_image_path
+        else:
+            candidate_source = self._resolve_source_path_from_parent()
+
+        if candidate_source and os.path.isfile(candidate_source):
+            return os.path.splitext(os.path.basename(candidate_source))[0]
+
+        return "analysis_result"
+
+    def _build_unique_save_path(self, save_dir):
+        base_name = self._get_source_base_name()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"{base_name}_{timestamp}.png"
+        file_path = os.path.join(save_dir, file_name)
+
+        if not os.path.exists(file_path):
+            return file_path
+
+        index = 1
+        while True:
+            file_name = f"{base_name}_{timestamp}_{index}.png"
+            file_path = os.path.join(save_dir, file_name)
+            if not os.path.exists(file_path):
+                return file_path
+            index += 1
+
+    # =========================
+    # display helpers
+    # =========================
+    def _get_image_extent(self):
+        return (0.0, 5.0, 0.0, 3.0)
+
+    def _setup_axes_for_original(self):
+        self.ax.set_facecolor("#111111")
+        self.ax.set_xlim(self.xlim)
+        self.ax.set_ylim(self.ylim)
+        self.ax.set_aspect('equal', adjustable='box')
+        self.ax.set_xticks([])
+        self.ax.set_yticks([])
+        for spine in self.ax.spines.values():
+            spine.set_visible(False)
+
+    def _setup_axes_for_heatmap(self):
+        self.ax.set_facecolor("white")
+        self.ax.set_xlim(self.xlim)
+        self.ax.set_ylim(self.ylim)
+        self.ax.set_xlabel('x [mm]', fontsize=11)
+        self.ax.set_ylabel('y [mm]', fontsize=11)
+        self.ax.grid(False)
+
+    def update_display(self):
+        try:
+            self.figure.clear()
+            self.ax = self.figure.add_subplot(111)
+
+            if self.show_original:
+                if self.view_model.image_array is None:
+                    self.update_info_text("No original image available.")
+                    return
+
+                img = self.view_model.image_array
+                extent = self._get_image_extent()
+                self.ax.imshow(
+                    img,
+                    cmap='gray',
+                    extent=extent,
+                    origin='upper',
+                    aspect='equal',
+                    interpolation='bilinear'
+                )
+                self._setup_axes_for_original()
+            else:
+                data = self.view_model.get_heatmap_data()
+                if data is None:
+                    self.update_info_text("No heatmap data available.")
+                    return
+                X, Y, Z = data
+                im = self.ax.contourf(X, Y, Z, levels=20, cmap=self.current_colormap)
+                self.figure.colorbar(im, ax=self.ax, label='Values')
+                self.ax.set_title('Droplet Analysis - Heatmap', fontsize=12, fontweight='bold')
+                self._setup_axes_for_heatmap()
+
+            self._draw_measurement_points()
+            self._draw_baseline_points()
+            self._draw_baseline()
+            if self.last_analysis_results is not None:
+                self._draw_analysis_results(self.last_analysis_results)
+
+            self.figure.tight_layout()
+            self.canvas.draw_idle()
+
+        except Exception as e:
+            self.update_info_text(f"Error updating display: {str(e)}")
+
+    # =========================
+    # baseline drawing
+    # =========================
+    def _line_segment_within_axes(self, a, b, c, xlim, ylim):
+        points = []
+        eps = 1e-12
+
+        if abs(b) > eps:
+            for x in [xlim[0], xlim[1]]:
+                y = (-a * x - c) / b
+                if ylim[0] - 1e-9 <= y <= ylim[1] + 1e-9:
+                    points.append((x, y))
+
+        if abs(a) > eps:
+            for y in [ylim[0], ylim[1]]:
+                x = (-b * y - c) / a
+                if xlim[0] - 1e-9 <= x <= xlim[1] + 1e-9:
+                    points.append((x, y))
+
+        unique = []
+        for p in points:
+            if not any(np.hypot(p[0] - q[0], p[1] - q[1]) < 1e-9 for q in unique):
+                unique.append(p)
+
+        if len(unique) >= 2:
+            unique.sort(key=lambda p: (p[0], p[1]))
+            return unique[0], unique[-1]
+        return None
+
+    def _draw_baseline(self):
+        if self.ax is None or self.baseline_coeffs is None:
+            return
+
+        if self.baseline_line is not None:
+            try:
+                self.baseline_line.remove()
+            except Exception:
+                pass
+            self.baseline_line = None
+
+        if self.baseline_anchor_points is not None and len(self.baseline_anchor_points) == 2:
+            (x1, y1), (x2, y2) = self.baseline_anchor_points
+            self.baseline_line = self.ax.plot(
+                [x1, x2], [y1, y2],
+                color=self.overlay_cfg["baseline_color"],
+                linestyle='-',
+                linewidth=self.overlay_cfg["baseline_width"],
+                alpha=self.overlay_cfg["baseline_alpha"],
+                solid_capstyle='round',
+                zorder=6
+            )[0]
+            return
+
+        a, b, c = self.baseline_coeffs
+        seg = self._line_segment_within_axes(a, b, c, self.ax.get_xlim(), self.ax.get_ylim())
+        if seg is None:
+            return
+
+        (x1, y1), (x2, y2) = seg
+        self.baseline_line = self.ax.plot(
+            [x1, x2], [y1, y2],
+            color=self.overlay_cfg["baseline_color"],
+            linestyle='-',
+            linewidth=self.overlay_cfg["baseline_width"],
+            alpha=self.overlay_cfg["baseline_alpha"],
+            solid_capstyle='round',
+            zorder=6
+        )[0]
+
+    def _clear_baseline_points_artists(self):
+        for artist in self.baseline_artists:
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self.baseline_artists.clear()
+        if self.ax is not None:
+            self.canvas.draw_idle()
+
+    def _draw_baseline_points(self):
+        if self.ax is None:
+            return
+
+        self._clear_baseline_points_artists()
+        for idx, (x, y) in enumerate(self.baseline_points):
+            point = self.ax.plot(
+                x, y,
+                marker='o',
+                linestyle='None',
+                markersize=5.5,
+                markerfacecolor=self.overlay_cfg["baseline_point_color"],
+                markeredgecolor='white',
+                markeredgewidth=0.8,
+                zorder=9
+            )[0]
+            point._point_index = idx
+            self.baseline_artists.append(point)
+
+        self.canvas.draw_idle()
+
+    # =========================
+    # measure points
+    # =========================
+    def _clear_measurement_artists(self):
+        for artist in self.measurement_artists:
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self.measurement_artists.clear()
+
+    def _draw_measurement_points(self):
+        if self.ax is None:
+            return
+
+        self._clear_measurement_artists()
+        for idx, (x, y) in enumerate(self.measurement_points):
+            point = self.ax.plot(
+                x, y,
+                marker='o',
+                linestyle='None',
+                markersize=5.5,
+                markerfacecolor=self.overlay_cfg["measure_point_color"],
+                markeredgecolor='white',
+                markeredgewidth=0.8,
+                zorder=9
+            )[0]
+            point._point_index = idx
+            self.measurement_artists.append(point)
+
+        self.canvas.draw_idle()
+
+    # =========================
+    # crosshair
+    # =========================
+    def _remove_crosshair(self):
+        for line in self.crosshair_lines:
+            try:
+                line.remove()
+            except Exception:
+                pass
+        self.crosshair_lines.clear()
+        if self.ax is not None:
+            self.canvas.draw_idle()
+
+    def _draw_crosshair(self, x, y):
+        if self.ax is None:
+            return
+
+        self._remove_crosshair()
+        xr = self.ax.get_xlim()[1] - self.ax.get_xlim()[0]
+        yr = self.ax.get_ylim()[1] - self.ax.get_ylim()[0]
+        size = min(xr, yr) * 0.02
+
+        line1 = self.ax.plot(
+            [x - size / 2, x + size / 2],
+            [y - size / 2, y + size / 2],
+            color=self.overlay_cfg["crosshair_color"],
+            linewidth=1.0,
+            alpha=0.85,
+            zorder=12
+        )[0]
+        line2 = self.ax.plot(
+            [x - size / 2, x + size / 2],
+            [y + size / 2, y - size / 2],
+            color=self.overlay_cfg["crosshair_color"],
+            linewidth=1.0,
+            alpha=0.85,
+            zorder=12
+        )[0]
+
+        self.crosshair_lines = [line1, line2]
+        self.canvas.draw_idle()
+
+    # =========================
+    # geometry helpers for angle rendering
+    # =========================
+    def _normalize(self, v):
+        v = np.asarray(v, dtype=float)
+        n = np.hypot(v[0], v[1])
+        if n < 1e-12:
+            return None
+        return v / n
+
+    def _oriented_baseline_inside_direction(self, contact_pt, footprint_midpoint):
+        if self.baseline_coeffs is None:
+            return None
+
+        a, b, _ = self.baseline_coeffs
+        baseline_dir = self._normalize((b, -a))
+        if baseline_dir is None:
+            return None
+
+        to_mid = np.asarray(footprint_midpoint, dtype=float) - np.asarray(contact_pt, dtype=float)
+        if np.dot(baseline_dir, to_mid) < 0:
+            baseline_dir = -baseline_dir
+        return baseline_dir
+
+    def _vector_angle_deg(self, v):
+        return float(np.degrees(np.arctan2(v[1], v[0])))
+
+    def _short_arc_angles(self, start_deg, end_deg):
+        s = start_deg % 360.0
+        e = end_deg % 360.0
+        diff = (e - s) % 360.0
+        if diff > 180.0:
+            s, e = e, s
+        return s, e
+
+    def _data_radius(self):
+        xr = self.ax.get_xlim()[1] - self.ax.get_xlim()[0]
+        yr = self.ax.get_ylim()[1] - self.ax.get_ylim()[0]
+        return min(xr, yr) * 0.085
+
+    def _label_offset(self):
+        xr = self.ax.get_xlim()[1] - self.ax.get_xlim()[0]
+        yr = self.ax.get_ylim()[1] - self.ax.get_ylim()[0]
+        return min(xr, yr) * 0.07
+
+    # =========================
+    # analysis overlay drawing
+    # =========================
+    def _clear_analysis_artists(self):
+        for artist in self.tangent_artists + self.angle_text_artists:
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self.tangent_artists.clear()
+        self.angle_text_artists.clear()
+        if self.ax is not None:
+            self.canvas.draw_idle()
+
+    def _draw_tangent_arrow(self, pt, direction, length):
+        start = np.asarray(pt, dtype=float)
+        end = start + direction * length
+
+        arrow = FancyArrowPatch(
+            posA=(start[0], start[1]),
+            posB=(end[0], end[1]),
+            arrowstyle='->',
+            mutation_scale=13,
+            lw=self.overlay_cfg["tangent_width"],
+            color=self.overlay_cfg["tangent_color"],
+            alpha=self.overlay_cfg["tangent_alpha"],
+            shrinkA=0.0,
+            shrinkB=0.0,
+            zorder=11
+        )
+        self.ax.add_patch(arrow)
+        self.tangent_artists.append(arrow)
+
+    def _draw_contact_angle_item(self, side, pt, tan_vec, angle_deg, footprint_midpoint):
+        if pt is None or tan_vec is None or angle_deg is None:
+            return
+
+        tangent_in = self._normalize(tan_vec)
+        baseline_in = self._oriented_baseline_inside_direction(pt, footprint_midpoint)
+        if tangent_in is None or baseline_in is None:
+            return
+
+        pt_arr = np.asarray(pt, dtype=float)
+        radius = self._data_radius()
+        tangent_len = radius * 4.6
+
+        sc = self.ax.scatter(
+            [pt_arr[0]], [pt_arr[1]],
+            s=self.overlay_cfg["contact_size"],
+            c=self.overlay_cfg["contact_color"],
+            edgecolors=self.overlay_cfg["contact_edge"],
+            linewidths=0.8,
+            alpha=0.95,
+            zorder=12
+        )
+        self.tangent_artists.append(sc)
+
+        self._draw_tangent_arrow(pt_arr, tangent_in, tangent_len)
+
+        start_deg = self._vector_angle_deg(baseline_in)
+        end_deg = self._vector_angle_deg(tangent_in)
+        theta1, theta2 = self._short_arc_angles(start_deg, end_deg)
+
+        arc = Arc(
+            (pt_arr[0], pt_arr[1]),
+            width=2 * radius,
+            height=2 * radius,
+            angle=0.0,
+            theta1=theta1,
+            theta2=theta2,
+            color=self.overlay_cfg["arc_color"],
+            lw=self.overlay_cfg["arc_width"],
+            alpha=self.overlay_cfg["arc_alpha"],
+            zorder=10
+        )
+        self.ax.add_patch(arc)
+        self.tangent_artists.append(arc)
+
+        baseline_seg_a = pt_arr - baseline_in * radius * 0.35
+        baseline_seg_b = pt_arr + baseline_in * radius * 0.95
+        line = self.ax.plot(
+            [baseline_seg_a[0], baseline_seg_b[0]],
+            [baseline_seg_a[1], baseline_seg_b[1]],
+            color=self.overlay_cfg["arc_color"],
+            linewidth=0.9,
+            alpha=0.60,
+            zorder=9
+        )[0]
+        self.tangent_artists.append(line)
+
+        bisector = self._normalize(baseline_in + tangent_in)
+        if bisector is None:
+            bisector = np.array([0.0, 1.0])
+
+        label_offset = self._label_offset()
+        label_pos = pt_arr + bisector * label_offset
+
+        if side == "left":
+            label_pos += np.array([-label_offset * 1.35, label_offset * 0.07])
+            ha = 'right'
+        else:
+            label_pos += np.array([label_offset * 1.35, label_offset * 0.07])
+            ha = 'left'
+
+        txt = self.ax.text(
+            label_pos[0],
+            label_pos[1],
+            f"{angle_deg:.1f}°",
+            fontsize=25,
+            fontweight='bold',
+            color=self.overlay_cfg["label_color"],
+            ha=ha,
+            va='center',
+            zorder=13,
+            bbox=dict(
+                boxstyle='round,pad=0.18',
+                facecolor=self.overlay_cfg["label_bbox_face"],
+                edgecolor=self.overlay_cfg["label_bbox_edge"],
+                linewidth=0.8
+            )
+        )
+        self.angle_text_artists.append(txt)
+
+    def _draw_analysis_results(self, results: dict):
+        if self.ax is None or results is None:
+            return
+
+        self._clear_analysis_artists()
+
+        left_pt = results.get('left_point')
+        right_pt = results.get('right_point')
+        left_tan = results.get('left_tangent')
+        right_tan = results.get('right_tangent')
+        left_angle = results.get('left_angle')
+        right_angle = results.get('right_angle')
+
+        if left_pt is None or right_pt is None:
+            return
+
+        footprint_midpoint = (
+            (left_pt[0] + right_pt[0]) / 2.0,
+            (left_pt[1] + right_pt[1]) / 2.0
+        )
+
+        info_parts = []
+
+        if self.angle_mode in ("Left Angle", "Two Angles") and left_pt is not None:
+            self._draw_contact_angle_item("left", left_pt, left_tan, left_angle, footprint_midpoint)
+            info_parts.append(f"Left contact angle : {left_angle:.2f}°")
+
+        if self.angle_mode in ("Right Angle", "Two Angles") and right_pt is not None:
+            self._draw_contact_angle_item("right", right_pt, right_tan, right_angle, footprint_midpoint)
+            info_parts.append(f"Right contact angle: {right_angle:.2f}°")
+
+        if left_angle is not None and right_angle is not None and self.angle_mode == "Two Angles":
+            mean_angle = (left_angle + right_angle) / 2.0
+            info_parts.append(f"Average angle      : {mean_angle:.2f}°")
+
+        self.update_info_text("\n".join(info_parts))
+        self.canvas.draw_idle()
+
+    # =========================
+    # interactions
+    # =========================
+    @pyqtSlot(bool)
+    def on_baseline_toggled(self, checked):
+        if checked:
+            if self.is_measuring:
+                self.btn_measure.setChecked(False)
+            self.is_baseline_mode = True
+            self.baseline_coeffs = None
+            self.baseline_anchor_points = None
+            if self.baseline_line is not None:
+                try:
+                    self.baseline_line.remove()
+                except Exception:
+                    pass
+                self.baseline_line = None
+
+            self.baseline_points.clear()
+            self._clear_baseline_points_artists()
+            self.update_info_text("Baseline mode: click on image to add baseline points.")
+        else:
+            self.is_baseline_mode = False
+            method = self.baseline_method
+
+            if method == "Double Points":
+                if len(self.baseline_points) < 2:
+                    QMessageBox.warning(
+                        self, "Not Enough Points",
+                        "Please place at least two points for baseline."
+                    )
+                    self.baseline_points.clear()
+                    self._clear_baseline_points_artists()
+                else:
+                    points = self.baseline_points[:2]
+                    coeffs = self.analysis_manager.compute_baseline(method, points=points)
+                    if coeffs is None:
+                        QMessageBox.critical(
+                            self, "Error",
+                            "Cannot compute baseline from the selected points."
+                        )
+                        self.baseline_points.clear()
+                        self._clear_baseline_points_artists()
+                    else:
+                        self.baseline_coeffs = coeffs
+                        self.baseline_anchor_points = points
+                        self._draw_baseline()
+                        self.baseline_points.clear()
+                        self._clear_baseline_points_artists()
+                        a, b, c = coeffs
+                        self.update_info_text(
+                            f"Baseline computed: {a:.3f}x + {b:.3f}y + {c:.3f} = 0"
+                        )
+
+            elif method == "Mirror Image Method":
+                if not self.analysis_manager.is_mirror_method_available():
+                    QMessageBox.information(
+                        self, "Under Development",
+                        "Mirror Image Method is currently under development."
+                    )
+                self.baseline_points.clear()
+                self._clear_baseline_points_artists()
+            else:
+                self.baseline_points.clear()
+                self._clear_baseline_points_artists()
+
+            self.canvas.draw_idle()
+
+    @pyqtSlot(bool)
+    def on_measure_toggled(self, checked):
+        if checked:
+            if self.is_baseline_mode:
+                self.btn_baseline.setChecked(False)
+            self.is_measuring = True
+            self.update_info_text("Measure mode: click to add profile points.")
+        else:
+            self.is_measuring = False
+            self.update_info_text("")
+
+    @pyqtSlot()
+    def on_auto_detect_clicked(self):
+        if self.view_model.image_array is None:
+            QMessageBox.warning(self, "No Image", "No image loaded.")
+            return
+
+        num_points, ok = QInputDialog.getInt(
+            self, "Auto Detect Edge",
+            "Enter number of edge points:",
+            value=50, min=1, max=1000, step=1
+        )
+        if not ok:
+            return
+
+        try:
+            from App.Models.Analysis.DropletAnalysis import auto_detect_edge_points
+            new_points = auto_detect_edge_points(
+                self.view_model.image_array,
+                num_points,
+                physical_width=5.0,
+                physical_height=3.0
+            )
+            if not new_points:
+                QMessageBox.warning(self, "No Edges", "No edges detected.")
+                return
+
+            self.measurement_points = new_points
+            self._draw_measurement_points()
+            self.update_info_text(f"Auto detected {len(new_points)} edge points.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Edge detection failed: {str(e)}")
+
+    def on_mouse_press(self, event):
+        if event.dblclick and event.button == 3 and (self.is_measuring or self.is_baseline_mode) and event.inaxes:
+            x, y = event.xdata, event.ydata
+            threshold = self.MEASURE_THRESHOLD
+            points_list = self.measurement_points if self.is_measuring else self.baseline_points
+            artists_list = self.measurement_artists if self.is_measuring else self.baseline_artists
+
+            for artist in artists_list:
+                if hasattr(artist, 'contains') and callable(artist.contains):
+                    contains, _ = artist.contains(event)
+                    if contains and hasattr(artist, '_point_index'):
+                        idx = artist._point_index
+                        if 0 <= idx < len(points_list):
+                            del points_list[idx]
+                            if self.is_measuring:
+                                self._draw_measurement_points()
+                            else:
+                                self._draw_baseline_points()
+                            return
+
+            idx_to_remove = None
+            for i, (px, py) in enumerate(points_list):
+                dist = np.sqrt((px - x) ** 2 + (py - y) ** 2)
+                if dist < threshold:
+                    idx_to_remove = i
+                    break
+
+            if idx_to_remove is not None:
+                del points_list[idx_to_remove]
+                if self.is_measuring:
+                    self._draw_measurement_points()
+                else:
+                    self._draw_baseline_points()
+            return
+
+        if event.button == 1 and (self.is_measuring or self.is_baseline_mode) and event.inaxes:
+            x, y = event.xdata, event.ydata
+            points_list = self.measurement_points if self.is_measuring else self.baseline_points
+            threshold = self.MEASURE_THRESHOLD
+
+            for i, (px, py) in enumerate(points_list):
+                dist = np.sqrt((px - x) ** 2 + (py - y) ** 2)
+                if dist < threshold:
+                    self.dragging_point_index = i
+                    return
+
+            points_list.append((x, y))
+            if self.is_measuring:
+                self._draw_measurement_points()
+            else:
+                self._draw_baseline_points()
+            return
+
+        if event.button == 3 and event.inaxes:
+            self.is_panning = True
+            self.pan_start_x = event.xdata
+            self.pan_start_y = event.ydata
+            self.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def on_mouse_release(self, event):
+        if event.button == 3:
+            self.is_panning = False
+            self.pan_start_x = None
+            self.pan_start_y = None
+            self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
+
+        if event.button == 1 and self.dragging_point_index != -1:
+            self.dragging_point_index = -1
+
+    def on_mouse_move(self, event):
+        if self.dragging_point_index != -1 and event.inaxes:
+            x, y = event.xdata, event.ydata
+            if self.is_measuring:
+                self.measurement_points[self.dragging_point_index] = (x, y)
+                self._draw_measurement_points()
+            elif self.is_baseline_mode:
+                self.baseline_points[self.dragging_point_index] = (x, y)
+                self._draw_baseline_points()
+
+        if (self.is_measuring or self.is_baseline_mode) and event.inaxes:
+            self._draw_crosshair(event.xdata, event.ydata)
+        else:
+            self._remove_crosshair()
+
+        if self.is_panning and event.inaxes and self.dragging_point_index == -1:
+            dx = event.xdata - self.pan_start_x
+            dy = event.ydata - self.pan_start_y
+
+            cur_xlim = self.ax.get_xlim()
+            cur_ylim = self.ax.get_ylim()
+
+            new_xlim_min = cur_xlim[0] - dx
+            new_xlim_max = cur_xlim[1] - dx
+            new_ylim_min = cur_ylim[0] - dy
+            new_ylim_max = cur_ylim[1] - dy
+
+            if new_xlim_min < self.x_bound[0]:
+                offset = self.x_bound[0] - new_xlim_min
+                new_xlim_min += offset
+                new_xlim_max += offset
+            elif new_xlim_max > self.x_bound[1]:
+                offset = self.x_bound[1] - new_xlim_max
+                new_xlim_min += offset
+                new_xlim_max += offset
+
+            if new_ylim_min < self.y_bound[0]:
+                offset = self.y_bound[0] - new_ylim_min
+                new_ylim_min += offset
+                new_ylim_max += offset
+            elif new_ylim_max > self.y_bound[1]:
+                offset = self.y_bound[1] - new_ylim_max
+                new_ylim_min += offset
+                new_ylim_max += offset
+
+            self.xlim = (new_xlim_min, new_xlim_max)
+            self.ylim = (new_ylim_min, new_ylim_max)
+            self.ax.set_xlim(self.xlim)
+            self.ax.set_ylim(self.ylim)
+            self.canvas.draw_idle()
+
+    # =========================
+    # zoom
+    # =========================
+    def _clamp_limits(self, xmin, xmax, ymin, ymax):
+        xmin = max(self.x_bound[0], xmin)
+        xmax = min(self.x_bound[1], xmax)
+        ymin = max(self.y_bound[0], ymin)
+        ymax = min(self.y_bound[1], ymax)
+
+        min_range = 0.1
+        if xmax - xmin < min_range:
+            center = (xmin + xmax) / 2
+            xmin = center - min_range / 2
+            xmax = center + min_range / 2
+            xmin = max(self.x_bound[0], xmin)
+            xmax = min(self.x_bound[1], xmax)
+
+        if ymax - ymin < min_range:
+            center = (ymin + ymax) / 2
+            ymin = center - min_range / 2
+            ymax = center + min_range / 2
+            ymin = max(self.y_bound[0], ymin)
+            ymax = min(self.y_bound[1], ymax)
+
+        return xmin, xmax, ymin, ymax
+
+    def on_scroll(self, event):
+        if event.inaxes is None:
+            return
+
+        scale_factor = 1.2 if event.button == 'up' else 1 / 1.2
+        xdata, ydata = event.xdata, event.ydata
+        xmin, xmax = self.xlim
+        ymin, ymax = self.ylim
+
+        new_xmin = xdata - (xdata - xmin) * scale_factor
+        new_xmax = xdata + (xmax - xdata) * scale_factor
+        new_ymin = ydata - (ydata - ymin) * scale_factor
+        new_ymax = ydata + (ymax - ydata) * scale_factor
+
+        new_xmin, new_xmax, new_ymin, new_ymax = self._clamp_limits(
+            new_xmin, new_xmax, new_ymin, new_ymax
+        )
+
+        self.xlim = (new_xmin, new_xmax)
+        self.ylim = (new_ymin, new_ymax)
+        self.ax.set_xlim(self.xlim)
+        self.ax.set_ylim(self.ylim)
+        self.canvas.draw_idle()
+
+    def reset_zoom(self):
+        self.xlim = self.default_xlim
+        self.ylim = self.default_ylim
+        if self.ax is not None:
+            self.ax.set_xlim(self.xlim)
+            self.ax.set_ylim(self.ylim)
+            self.canvas.draw_idle()
+
+    # =========================
+    # info
+    # =========================
+    def update_analysis_info(self, analysis_data):
+        info_text = f"""
+Analysis Results:
+
+Image Dimensions:
+  Width : {analysis_data.get('width', 'N/A')} pixels
+  Height: {analysis_data.get('height', 'N/A')} pixels
+
+Coordinates:
+  Physical Size: 5.0 mm x 3.0 mm
+
+Display:
+  Default view : Original Image
+  Overlay style: Contact-angle reference mode
+"""
+        self.info_text.setText(info_text)
+
+    def update_info_text(self, text):
+        self.info_text.setText(text)
+
+    # =========================
+    # button slots
+    # =========================
+    @pyqtSlot()
+    def on_actual_size_clicked(self):
+        self.reset_zoom()
+
+    @pyqtSlot()
+    def on_refresh_clicked(self):
+        self.baseline_coeffs = None
+        self.baseline_anchor_points = None
+        self.last_analysis_results = None
+
+        if self.baseline_line is not None:
+            try:
+                self.baseline_line.remove()
+            except Exception:
+                pass
+            self.baseline_line = None
+
+        self._clear_analysis_artists()
+
+        self.measurement_points.clear()
+        self._clear_measurement_artists()
+        self.baseline_points.clear()
+        self._clear_baseline_points_artists()
+
+        self.is_measuring = False
+        self.is_baseline_mode = False
+        self.btn_measure.setChecked(False)
+        self.btn_baseline.setChecked(False)
+
+        if self.view_model.perform_analysis():
+            self.update_display()
+        else:
+            QMessageBox.warning(self, "Refresh Failed", "Could not refresh analysis.")
+
+    @pyqtSlot()
+    def on_save_clicked(self):
+        """
+        Auto-save analysis result directly into:
+            <current_item>/Image/
+
+        No file dialog.
+        Saved image has no black border.
+        """
+        save_dir = self._get_analysis_save_dir()
+        if not save_dir:
+            QMessageBox.warning(
+                self,
+                "Save Failed",
+                "Cannot determine the current item's Image folder automatically."
+            )
+            return
+
+        file_path = self._build_unique_save_path(save_dir)
+
+        try:
+            original_figure_facecolor = self.figure.get_facecolor()
+            original_ax_facecolor = self.ax.get_facecolor() if self.ax is not None else None
+
+            # Temporarily switch export background to white to remove black border
+            self.figure.set_facecolor("white")
+            if self.ax is not None:
+                self.ax.set_facecolor("white")
+
+            self.figure.savefig(
+                file_path,
+                dpi=180,
+                bbox_inches='tight',
+                pad_inches=0,
+                facecolor="white",
+                edgecolor="white"
+            )
+
+            # Restore on-screen appearance
+            self.figure.set_facecolor(original_figure_facecolor)
+            if self.ax is not None and original_ax_facecolor is not None:
+                self.ax.set_facecolor(original_ax_facecolor)
+
+            self.canvas.draw_idle()
+            QMessageBox.information(self, "Success", f"Saved to:\n{file_path}")
+
+        except Exception as e:
+            # best-effort restore
+            try:
+                self.figure.set_facecolor("#111111")
+                if self.ax is not None:
+                    if self.show_original:
+                        self.ax.set_facecolor("#111111")
+                    else:
+                        self.ax.set_facecolor("white")
+                self.canvas.draw_idle()
+            except Exception:
+                pass
+
+            QMessageBox.critical(self, "Save Failed", f"Could not save file:\n{str(e)}")
+
+    @pyqtSlot()
+    def on_analysis_manually_clicked(self):
+        if self.baseline_coeffs is None:
+            QMessageBox.warning(
+                self, "No Baseline",
+                "Please set a baseline first using the Baseline button."
+            )
+            return
+
+        if len(self.measurement_points) < 3:
+            QMessageBox.warning(
+                self, "Not Enough Points",
+                "Please place at least three points on the droplet profile using the Measure tool or Auto Detect."
+            )
+            return
+
+        analysis_method = self.analysis_method
+        results = self.analysis_manager.analyze_droplet(
+            analysis_method,
+            self.baseline_coeffs,
+            self.measurement_points
+        )
+        if results is None:
+            QMessageBox.critical(
+                self, "Analysis Failed",
+                f"Could not perform {analysis_method} with the given points."
+            )
+            return
+
+        self.last_analysis_results = results
+        self._draw_analysis_results(results)
+
+        self.measurement_points.clear()
+        self._clear_measurement_artists()
+        self.canvas.draw_idle()
+        self.update_info_text("Analysis completed. Measure points cleared.")
+
+    @pyqtSlot()
+    def on_delete_measure_point_clicked(self):
+        self.measurement_points.clear()
+        self._clear_measurement_artists()
+        self.update_info_text("All measure points deleted.")
+        self.canvas.draw_idle()
+
+    @pyqtSlot(str)
+    def on_angle_mode_changed(self, text):
+        self.angle_mode = text
+        if self.last_analysis_results is not None:
+            self._draw_analysis_results(self.last_analysis_results)
+
+    @pyqtSlot(bool)
+    def on_baseline_method_changed(self, checked):
+        if checked:
+            sender = self.sender()
+            if sender == self.radio_double:
+                self.baseline_method = "Double Points"
+            elif sender == self.radio_mirror:
+                self.baseline_method = "Mirror Image Method"
+
+    @pyqtSlot(bool)
+    def on_analysis_method_changed(self, checked):
+        if checked:
+            sender = self.sender()
+            if sender == self.radio_ellipsoid:
+                self.analysis_method = "Ellipsoid Fit"
+            elif sender == self.radio_young_laplace:
+                self.analysis_method = "Young-Laplace Fit"
+
+    @pyqtSlot(bool)
+    def on_colormap_toggled(self, checked):
+        if not checked:
+            return
+
+        sender = self.sender()
+        if sender == self.btn_colormap_viridis:
+            self.current_colormap = 'viridis'
+        elif sender == self.btn_colormap_plasma:
+            self.current_colormap = 'plasma'
+        elif sender == self.btn_colormap_hot:
+            self.current_colormap = 'hot'
+        else:
+            return
+
+        self.show_original = False
+        self.update_display()
+
+    @pyqtSlot(bool)
+    def on_original_toggled(self, checked):
+        if checked:
+            self.show_original = True
+            self.update_display()
+
+    # =========================
+    # lifecycle
+    # =========================
+    def closeEvent(self, event):
+        if self in DropletAnalysisWindow._instances:
+            DropletAnalysisWindow._instances.remove(self)
+        super().closeEvent(event)
+
+    @classmethod
+    def close_all_windows(cls):
+        for window in cls._instances[:]:
+            window.close()
+
+    @classmethod
+    def get_instance_count(cls):
+        return len(cls._instances)
