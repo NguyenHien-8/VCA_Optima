@@ -11,6 +11,7 @@ dist/
 *.exe
 *.pyc
 *.pyo
+*.db
 
 # Virtual environment
 venv/
