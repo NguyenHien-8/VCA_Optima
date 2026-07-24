@@ -1,3 +1,8 @@
+########################################################
+# @file App/Models/Controllers/HardwareConnector.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import sys
 import threading
 import time

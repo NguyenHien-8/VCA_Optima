@@ -1,3 +1,8 @@
+########################################################
+# @file App/Models/MediaUtils/VideoRecorderManager.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import os
 from collections import deque
 from datetime import datetime

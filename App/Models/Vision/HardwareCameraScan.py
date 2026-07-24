@@ -1,4 +1,8 @@
-# App/Models/Vision/HardwareCameraScan.py
+########################################################
+# @file App/Models/Vision/HardwareCameraScan.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import sys
 from PyQt6.QtCore import QThread, pyqtSignal
 

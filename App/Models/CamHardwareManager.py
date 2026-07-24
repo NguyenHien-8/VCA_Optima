@@ -1,4 +1,8 @@
-# App/Models/CamHardwareManager.py
+########################################################
+# @file App/Models/CamHardwareManager.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 from App.Infrastructure.Repositories.ConfigRepository import ConfigRepository
 
 class CameraConfigBackend:

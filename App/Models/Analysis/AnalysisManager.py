@@ -1,3 +1,8 @@
+########################################################
+# @file App/Models/Analysis/AnalysisManager.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import numpy as np
 from typing import List, Tuple, Optional
 from App.Models.Analysis.BaselineAnalysis import BaselineAnalyzer

@@ -1,4 +1,8 @@
-# App/Models/SessionManager.py
+########################################################
+# @file App/Models/SessionManager.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 from typing import List, Dict, Set
 from App.Infrastructure.Repositories.SessionRepository import SessionRepository
 

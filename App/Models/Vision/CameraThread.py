@@ -1,4 +1,8 @@
-# App/Models/Vision/CameraThread.py
+########################################################
+# @file App/Models/Vision/CameraThread.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import sys
 from PyQt6.QtCore import QThread, pyqtSignal, QMutex, QWaitCondition
 from PyQt6.QtGui import QImage

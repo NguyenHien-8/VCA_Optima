@@ -1,4 +1,8 @@
-# App/Models/ControlPanelManager.py
+########################################################
+# @file App/Models/ControlPanelManager.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 class ControlPanelManager:
     def __init__(self, hardware_manager):
         self.hardware_manager = hardware_manager

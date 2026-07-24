@@ -1,3 +1,8 @@
+########################################################
+# @file App/Models/Analysis/DropletAnalysis.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import numpy as np
 import cv2
 from scipy.optimize import least_squares

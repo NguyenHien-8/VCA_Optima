@@ -1,4 +1,8 @@
-# App/Models/MediaUtils/ImageCaptureManager.py
+########################################################
+# @file App/Models/MediaUtils/ImageCaptureManager.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import os
 from datetime import datetime
 

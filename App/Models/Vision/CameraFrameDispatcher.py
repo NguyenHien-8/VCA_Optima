@@ -1,4 +1,8 @@
-# App/Models/Vision/CameraFrameDispatcher.py
+########################################################
+# @file App/Models/Vision/CameraFrameDispatcher.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QImage
 from App.Infrastructure.CrashHandler import log_exception

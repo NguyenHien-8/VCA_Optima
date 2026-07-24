@@ -1,4 +1,8 @@
-# App/Models/Controllers/HardwareManager.py
+########################################################
+# @file App/Models/Controllers/HardwareManager.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 from PyQt6.QtCore import QObject, pyqtSignal
 from App.Models.Controllers.HardwareConnector import HardwareConnector
 

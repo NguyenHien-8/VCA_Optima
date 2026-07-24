@@ -1,4 +1,8 @@
-# App/Models/MediaUtils/MediaManager.py
+########################################################
+# @file App/Models/MediaUtils/MediaManager.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import os
 from .ImageCaptureManager import ImageCaptureManager, ImageProcessor  
 from .VideoRecorderManager import VideoRecorderManager, VideoState
