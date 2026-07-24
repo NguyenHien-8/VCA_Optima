@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/FileEditorWorkspace/VideoEditor.py
+##########################################################################
+# @file App/Presentation/Views/Widgets/FileEditorWorkspace/VideoEditor.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+##########################################################################
 import os
 from datetime import datetime
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,

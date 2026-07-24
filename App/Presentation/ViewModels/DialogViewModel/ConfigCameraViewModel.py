@@ -1,4 +1,8 @@
-# App/Presentation/ViewModels/DialogViewModel/ConfigCameraViewModel.py
+###############################################################################
+# @file App/Presentation/ViewModels/DialogViewModel/ConfigCameraViewModel.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+###############################################################################
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QImage
 from App.Models.CamHardwareManager import CameraConfigBackend

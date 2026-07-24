@@ -1,4 +1,8 @@
-# App/Presentation/Views/Dialog/SaveResourcesDialog.py
+##############################################################
+# @file App/Presentation/Views/Dialog/SaveResourcesDialog.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+##############################################################
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QSizePolicy)
 from PyQt6.QtCore import Qt

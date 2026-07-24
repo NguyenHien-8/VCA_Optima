@@ -1,4 +1,8 @@
-# App/Presentation/ViewModels/FileEditorViewModel.py
+#############################################################################
+# @file App/Presentation/ViewModels/FeatureViewModel/FileEditorViewModel.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+#############################################################################
 import os
 from collections import deque
 

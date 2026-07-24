@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/FileEditorWorkspace/MotorControlEditor.py
+#################################################################################
+# @file App/Presentation/Views/Widgets/FileEditorWorkspace/MotorControlEditor.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+#################################################################################
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QPushButton, QGridLayout, QGroupBox,
                              QSizePolicy)

@@ -1,4 +1,8 @@
-# App/Presentation/Views/Dialog/ConfigHardwareDialog.py
+##############################################################
+# @file App/Presentation/Views/Dialog/ConfigHardwareDialog.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+##############################################################
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QLineEdit, QPushButton, QStyle,
                              QFrame, QSpacerItem, QSizePolicy, QMessageBox)

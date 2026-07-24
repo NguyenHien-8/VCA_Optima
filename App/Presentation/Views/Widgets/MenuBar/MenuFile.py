@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/MenuBar/MenuFile.py
+############################################################
+# @file App/Presentation/Views/Widgets/MenuBar/MenuFile.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+############################################################
 import os
 import sys
 from PyQt6.QtWidgets import QMenu, QApplication

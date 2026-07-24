@@ -1,3 +1,8 @@
+#############################################
+# @file App/Presentation/Views/MainView.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+#############################################
 import os
 import weakref
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QWidget,

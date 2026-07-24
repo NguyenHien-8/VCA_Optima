@@ -1,4 +1,8 @@
-# App/Presentation/ViewModels/Workers.py
+######################################################
+# @file App/Presentation/ViewModels/Workers.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+######################################################
 import os
 import tempfile
 from PyQt6.QtCore import QThread, pyqtSignal

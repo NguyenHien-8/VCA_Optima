@@ -1,4 +1,8 @@
-# App/Presentation/Views/Dialog/DeleteResourcesDialog.py
+##############################################################
+# @file App/Presentation/Views/Dialog/DeleteResourcesDialog.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+##############################################################
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QGridLayout, QLabel,
                              QCheckBox, QPushButton, QHBoxLayout, QWidget)
 from PyQt6.QtCore import Qt

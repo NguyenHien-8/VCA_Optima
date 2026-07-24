@@ -1,4 +1,8 @@
-# App/Presentation/ViewModels/MainViewModel.py
+######################################################
+# @file App/Presentation/ViewModels/MainViewModel.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+######################################################
 import os
 from typing import List
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer

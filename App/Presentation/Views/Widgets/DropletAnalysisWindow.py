@@ -1,3 +1,8 @@
+###############################################################
+# @file App/Presentation/Views/Widgets/DropletAnalysisWindow.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+###############################################################
 import os
 import numpy as np
 from datetime import datetime

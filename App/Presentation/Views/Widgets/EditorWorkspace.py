@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/EditorWorkspace.py
+##########################################################
+# @file App/Presentation/Views/Widgets/EditorWorkspace.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+##########################################################
 import os
 from PyQt6.QtWidgets import (QTabWidget, QWidget, QLabel, QStackedLayout, QTabBar)
 from PyQt6.QtCore import pyqtSignal, Qt, QMimeData

@@ -1,4 +1,8 @@
-# App/Presentation/ViewModels/DialogViewModel/MotorControlViewModel.py
+###############################################################################
+# @file App/Presentation/ViewModels/DialogViewModel/MotorControlViewModel.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+###############################################################################
 from PyQt6.QtCore import QObject, pyqtSignal
 
 class MotorControlViewModel(QObject):

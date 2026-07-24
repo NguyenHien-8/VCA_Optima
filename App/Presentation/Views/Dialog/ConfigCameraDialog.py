@@ -1,3 +1,8 @@
+###########################################################
+# @file App/Presentation/Views/Dialog/ConfigCameraDialog.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+###########################################################
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QPushButton, QMessageBox, QFrame,
                              QSizePolicy, QStyle, QSpacerItem)

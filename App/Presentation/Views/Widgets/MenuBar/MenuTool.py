@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/MenuBar/MenuHelp.py
+############################################################
+# @file App/Presentation/Views/Widgets/MenuBar/MenuTool.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+############################################################
 from PyQt6.QtWidgets import QMenu, QStyle
 from PyQt6.QtGui import QAction  
 

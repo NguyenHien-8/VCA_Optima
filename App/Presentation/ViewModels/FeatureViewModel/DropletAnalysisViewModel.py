@@ -1,3 +1,8 @@
+##################################################################################
+# @file App/Presentation/ViewModels/FeatureViewModel/DropletAnalysisViewModel.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+##################################################################################
 import numpy as np
 
 from PyQt6.QtCore import QObject, pyqtSignal

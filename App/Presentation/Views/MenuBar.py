@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/MenuBar/MenuBar.py
+#############################################
+# @file App/Presentation/Views/MenuBar.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+#############################################
 from PyQt6.QtWidgets import QMenuBar
 
 from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet

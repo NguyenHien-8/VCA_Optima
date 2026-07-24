@@ -1,3 +1,8 @@
+########################################################
+# @file App/Presentation/Views/Widgets/SideBar.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import json
 import os
 from PyQt6.QtWidgets import (QDockWidget, QTabWidget, QWidget, QVBoxLayout,
@@ -62,6 +67,9 @@ class DraggableTreeWidget(QTreeWidget):
         self.setDragDropOverwriteMode(False)
         self.setAutoScroll(True)
         self.setAutoScrollMargin(24)
+        self.setVerticalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
 
@@ -75,6 +83,14 @@ class DraggableTreeWidget(QTreeWidget):
         )
         self.setStyle(self._drop_indicator_style)
         self._dragged_tree_item = None
+        self._drag_scroll_timer = QTimer(self)
+        self._drag_scroll_timer.setInterval(40)
+        self._drag_scroll_timer.timeout.connect(
+            self._perform_drag_autoscroll
+        )
+        self._drag_scroll_direction = 0
+        self._drag_scroll_margin = 32
+        self._drag_scroll_step = 16
 
     @staticmethod
     def _node_kind(item):
@@ -144,6 +160,7 @@ class DraggableTreeWidget(QTreeWidget):
             try:
                 drag.exec(Qt.DropAction.MoveAction)
             finally:
+                self._stop_drag_autoscroll()
                 self._dragged_tree_item = None
                 self._clear_drop_indicator()
             return
@@ -169,7 +186,10 @@ class DraggableTreeWidget(QTreeWidget):
 
         drag = QDrag(self)
         drag.setMimeData(mime_data)
-        drag.exec(Qt.DropAction.CopyAction)
+        try:
+            drag.exec(Qt.DropAction.CopyAction)
+        finally:
+            self._stop_drag_autoscroll()
 
     def dragEnterEvent(self, event):
         if (
@@ -183,6 +203,15 @@ class DraggableTreeWidget(QTreeWidget):
 
     def dragMoveEvent(self, event):
         pos = event.position().toPoint()
+        if self._is_internal_reorder_drag(event):
+            # Keep scrolling even when the current row itself is not a valid
+            # reorder destination. This lets the pointer pass over expanded
+            # Image/Video/file descendants while their PROJECT/ITEM ancestor
+            # remains the snapped target.
+            self._update_drag_autoscroll(pos)
+        else:
+            self._stop_drag_autoscroll()
+
         drop_info = self._drop_info_at(pos)
         if drop_info is None:
             self._clear_drop_indicator()
@@ -199,10 +228,12 @@ class DraggableTreeWidget(QTreeWidget):
         event.accept()
 
     def dragLeaveEvent(self, event):
+        self._stop_drag_autoscroll()
         self._clear_drop_indicator()
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event):
+        self._stop_drag_autoscroll()
         if not (
             event.source() is self
             and event.mimeData().hasFormat(self.INTERNAL_NODE_MIME)
@@ -227,6 +258,73 @@ class DraggableTreeWidget(QTreeWidget):
             event.accept()
         else:
             event.ignore()
+
+    def _is_internal_reorder_drag(self, event):
+        if (
+            event.source() is not self
+            or not event.mimeData().hasFormat(self.INTERNAL_NODE_MIME)
+            or self._dragged_tree_item is None
+        ):
+            return False
+
+        source = self._dragged_tree_item
+        return (
+            source.treeWidget() is self
+            and self._node_kind(source) in ("PROJECT", "ITEM")
+        )
+
+    def _update_drag_autoscroll(self, pos):
+        source = self._dragged_tree_item
+        if (
+            source is None
+            or source.treeWidget() is not self
+            or self._node_kind(source) not in ("PROJECT", "ITEM")
+        ):
+            self._stop_drag_autoscroll()
+            return
+
+        viewport_height = self.viewport().height()
+        margin = min(
+            self._drag_scroll_margin,
+            max(0, viewport_height // 2),
+        )
+        if pos.y() < margin:
+            direction = -1
+        elif pos.y() > viewport_height - margin:
+            direction = 1
+        else:
+            self._stop_drag_autoscroll()
+            return
+
+        self._drag_scroll_direction = direction
+        if not self._drag_scroll_timer.isActive():
+            self._drag_scroll_timer.start()
+
+    def _perform_drag_autoscroll(self):
+        if self._drag_scroll_direction == 0:
+            self._stop_drag_autoscroll()
+            return
+
+        scrollbar = self.verticalScrollBar()
+        current_value = scrollbar.value()
+        new_value = current_value + (
+            self._drag_scroll_direction * self._drag_scroll_step
+        )
+        new_value = max(
+            scrollbar.minimum(),
+            min(scrollbar.maximum(), new_value),
+        )
+        if new_value == current_value:
+            self._stop_drag_autoscroll()
+            return
+
+        scrollbar.setValue(new_value)
+        self.viewport().update()
+
+    def _stop_drag_autoscroll(self):
+        self._drag_scroll_direction = 0
+        if self._drag_scroll_timer.isActive():
+            self._drag_scroll_timer.stop()
 
     def _clear_drop_indicator(self):
         old_rect = QRect(self._custom_drop_indicator_rect)

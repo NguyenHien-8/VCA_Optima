@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/FileEditorWorkspace/FileEditor.py
+########################################################################
+# @file App/Presentation/Views/Widgets/FileEditorWorkspace/FileEditor.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################################
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QMessageBox, QSizePolicy
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtGui import QImage, QPixmap

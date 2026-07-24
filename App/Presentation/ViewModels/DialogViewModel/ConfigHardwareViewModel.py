@@ -1,4 +1,8 @@
-# App/Presentation/ViewModels/DialogViewModel/ConfigHardwareViewModel.py
+###############################################################################
+# @file App/Presentation/ViewModels/DialogViewModel/ConfigHardwareViewModel.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+###############################################################################
 from PyQt6.QtCore import QObject
 from App.Models.CamHardwareManager import HardwareConfigBackend
 

@@ -1,4 +1,8 @@
-# App/Presentation/Views/Dialog/MotorControlDialog.py
+##############################################################
+# @file App/Presentation/Views/Dialog/MotorControlDialog.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+##############################################################
 from collections import deque
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,

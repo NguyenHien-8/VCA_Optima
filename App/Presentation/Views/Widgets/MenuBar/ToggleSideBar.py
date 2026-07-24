@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/MenuBar/ToggleSideBar.py
+###############################################################
+# @file App/Presentation/Views/Widgets/MenuBar/ToggleSideBar.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+###############################################################
 from PyQt6.QtGui import QAction, QIcon, QPixmap, QPainter
 from PyQt6.QtCore import Qt
 

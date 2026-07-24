@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/StatusBar.py
+#####################################################
+# @file App/Presentation/Views/Widgets/StatusBar.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+#####################################################
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QFrame
 
 class StatusIndicator(QWidget):

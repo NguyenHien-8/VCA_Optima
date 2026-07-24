@@ -1,4 +1,8 @@
-# App/Presentation/ViewModels/FeatureViewModel/ImageEditorViewModel.py
+#############################################################################
+# @file App/Presentation/ViewModels/FeatureViewModel/ImageEditorViewModel.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+#############################################################################
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from App.Presentation.ViewModels.Workers import FunctionWorker

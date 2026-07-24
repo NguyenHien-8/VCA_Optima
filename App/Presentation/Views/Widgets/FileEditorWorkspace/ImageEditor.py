@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/FileEditorWorkspace/ImageEditor.py
+#########################################################################
+# @file App/Presentation/Views/Widgets/FileEditorWorkspace/ImageEditor.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+#########################################################################
 import os
 import numpy as np
 

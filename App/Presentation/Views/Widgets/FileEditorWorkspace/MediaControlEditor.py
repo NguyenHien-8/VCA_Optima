@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/FileEditorWorkspace/MediaControlEditor.py
+#################################################################################
+# @file App/Presentation/Views/Widgets/FileEditorWorkspace/MediaControlEditor.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+#################################################################################
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGroupBox, QSizePolicy, QMessageBox)

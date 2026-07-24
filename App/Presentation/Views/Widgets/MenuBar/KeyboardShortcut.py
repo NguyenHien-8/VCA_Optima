@@ -1,4 +1,8 @@
-# App/Presentation/Views/Widgets/MenuBar/KeyboardShortcut.py
+##################################################################
+# @file App/Presentation/Views/Widgets/MenuBar/KeyboardShortcut.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+##################################################################
 
 # ====================================================== #
 # DEFINING KEYBOARD SHORTCUTS FOR THE ENTIRE APPLICATION
