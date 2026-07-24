@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 from scipy.optimize import least_squares
 from scipy.linalg import eig
-from typing import List, Tuple, Optional, Dict
+from typing import Dict, List, Optional, Sequence, Tuple
 
 # ========================================================================
 # SOLUTION 1: FITZGIBBON DIRECT ELLIPSE FIT (Optimal Initialization)
@@ -876,6 +876,207 @@ def _longest_valid_contour_arc(
     return max(runs, key=run_score)
 
 
+def _point_above_baseline_at_x(
+    contact_x: float,
+    baseline_coeffs: Tuple[float, float, float],
+    scale_x: float,
+    scale_y: float,
+    physical_height: float,
+    contact_offset_px: float,
+) -> np.ndarray:
+    """Build a pixel point at a controlled clearance above the baseline."""
+    a_line, b_line, c_line = baseline_coeffs
+    x_physical = contact_x * scale_x
+    baseline_y_physical = -(
+        a_line * x_physical + c_line
+    ) / b_line
+    baseline_y_pixel = (
+        physical_height - baseline_y_physical
+    ) / scale_y
+    return np.array(
+        [contact_x, baseline_y_pixel - contact_offset_px],
+        dtype=np.float64,
+    )
+
+
+def _estimate_contact_point(
+    side_points: np.ndarray,
+    side_clearance_px: np.ndarray,
+    baseline_coeffs: Tuple[float, float, float],
+    scale_x: float,
+    scale_y: float,
+    physical_height: float,
+    contact_offset_px: float,
+    fit_limit_px: float,
+    maximum_shift_px: float,
+) -> np.ndarray:
+    """Extrapolate a local droplet side to a point just above the baseline."""
+    fit_mask = (
+        (side_clearance_px >= contact_offset_px)
+        & (side_clearance_px <= fit_limit_px)
+    )
+    fit_points = side_points[fit_mask]
+    fit_clearance = side_clearance_px[fit_mask]
+    boundary_x = float(side_points[0, 0])
+
+    if len(fit_points) >= 4 and float(np.ptp(fit_clearance)) > 1.0:
+        design = np.column_stack(
+            (fit_clearance.astype(np.float64), np.ones(len(fit_clearance)))
+        )
+        slope, intercept = np.linalg.lstsq(
+            design,
+            fit_points[:, 0].astype(np.float64),
+            rcond=None,
+        )[0]
+        contact_x = float(slope * contact_offset_px + intercept)
+        contact_x = float(
+            np.clip(
+                contact_x,
+                boundary_x - maximum_shift_px,
+                boundary_x + maximum_shift_px,
+            )
+        )
+    else:
+        contact_x = boundary_x
+
+    return _point_above_baseline_at_x(
+        contact_x,
+        baseline_coeffs,
+        scale_x,
+        scale_y,
+        physical_height,
+        contact_offset_px,
+    )
+
+
+def _trim_contour_to_liquid_cap(
+    contour_arc: np.ndarray,
+    baseline_coeffs: Tuple[float, float, float],
+    scale_x: float,
+    scale_y: float,
+    physical_height: float,
+    baseline_margin_pixels: float,
+    contact_hint_points_px: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    Remove low-clearance substrate tails and reconstruct both contact points.
+
+    A connected substrate band can be part of the same binary component as the
+    droplet. Its clearance from the baseline remains small, while the liquid cap
+    grows rapidly towards the apex. The transition on each side defines the
+    footprint; a local side fit then places the endpoint just above the baseline.
+    """
+    if contour_arc is None or len(contour_arc) < 7:
+        return contour_arc
+
+    points = contour_arc.astype(np.float64)
+    if points[0, 0] > points[-1, 0]:
+        points = points[::-1]
+
+    clearance_physical = _baseline_clearance(
+        points,
+        baseline_coeffs,
+        scale_x,
+        scale_y,
+        physical_height,
+    )
+    clearance_px = clearance_physical / scale_y
+    apex_index = int(np.argmax(clearance_px))
+    maximum_clearance_px = float(clearance_px[apex_index])
+    if apex_index < 3 or apex_index > len(points) - 4:
+        return points
+
+    transition_px = max(
+        baseline_margin_pixels + 1.0,
+        min(10.0, maximum_clearance_px * 0.025),
+    )
+    left_low = np.flatnonzero(
+        clearance_px[:apex_index] <= transition_px
+    )
+    right_low = np.flatnonzero(
+        clearance_px[apex_index + 1:] <= transition_px
+    )
+    if len(left_low) == 0 or len(right_low) == 0:
+        return points
+
+    left_index = int(left_low[-1])
+    right_index = int(apex_index + 1 + right_low[0])
+    if right_index - left_index < 6:
+        return points
+
+    core = points[left_index:right_index + 1].copy()
+    core_clearance_px = clearance_px[left_index:right_index + 1]
+    core_apex_index = apex_index - left_index
+    fit_limit_px = max(
+        transition_px + 6.0,
+        min(40.0, maximum_clearance_px * 0.12),
+    )
+    contact_offset_px = max(
+        0.5,
+        min(1.0, baseline_margin_pixels * 0.25),
+    )
+    maximum_shift_px = max(
+        4.0,
+        float(np.ptp(core[:, 0])) * 0.03,
+    )
+
+    left_contact = _estimate_contact_point(
+        core[:core_apex_index + 1],
+        core_clearance_px[:core_apex_index + 1],
+        baseline_coeffs,
+        scale_x,
+        scale_y,
+        physical_height,
+        contact_offset_px,
+        fit_limit_px,
+        maximum_shift_px,
+    )
+    right_contact = _estimate_contact_point(
+        core[core_apex_index:][::-1],
+        core_clearance_px[core_apex_index:][::-1],
+        baseline_coeffs,
+        scale_x,
+        scale_y,
+        physical_height,
+        contact_offset_px,
+        fit_limit_px,
+        maximum_shift_px,
+    )
+    if (
+        contact_hint_points_px is not None
+        and contact_hint_points_px.shape == (2, 2)
+        and np.all(np.isfinite(contact_hint_points_px))
+    ):
+        hints = contact_hint_points_px[
+            np.argsort(contact_hint_points_px[:, 0])
+        ]
+        hint_tolerance_px = max(
+            6.0,
+            float(np.ptp(core[:, 0])) * 0.12,
+        )
+        if abs(float(hints[0, 0]) - left_contact[0]) <= hint_tolerance_px:
+            left_contact = _point_above_baseline_at_x(
+                float(hints[0, 0]),
+                baseline_coeffs,
+                scale_x,
+                scale_y,
+                physical_height,
+                contact_offset_px,
+            )
+        if abs(float(hints[1, 0]) - right_contact[0]) <= hint_tolerance_px:
+            right_contact = _point_above_baseline_at_x(
+                float(hints[1, 0]),
+                baseline_coeffs,
+                scale_x,
+                scale_y,
+                physical_height,
+                contact_offset_px,
+            )
+    core[0] = left_contact
+    core[-1] = right_contact
+    return core
+
+
 def _resample_contour_arc(
     contour_arc: np.ndarray,
     num_points: int,
@@ -917,13 +1118,17 @@ def auto_detect_edge_points(
     physical_height: float = 3.0,
     baseline_coeffs: Optional[Tuple[float, float, float]] = None,
     baseline_margin_pixels: float = 2.0,
+    baseline_anchor_points: Optional[
+        Sequence[Tuple[float, float]]
+    ] = None,
 ) -> List[Tuple[float, float]]:
     """
     Detect the liquid-cap silhouette strictly above a user-defined baseline.
 
     The baseline first masks the substrate/reflection half-plane. Candidate
-    contours must have meaningful height above that line. The longest continuous
-    arc above a small clearance is then sampled uniformly by arc length.
+    contours must have meaningful height above that line. Low-clearance tails
+    are removed, validated baseline anchors can pin the contact endpoints, and
+    the resulting liquid-cap arc is sampled uniformly by arc length.
     """
     try:
         requested_points = int(num_points)
@@ -966,6 +1171,28 @@ def auto_detect_edge_points(
     above_baseline = y_phys >= baseline_y[None, :]
     if not np.any(above_baseline):
         return []
+
+    contact_hint_points_px = None
+    if baseline_anchor_points is not None:
+        try:
+            anchor_points = np.asarray(
+                baseline_anchor_points,
+                dtype=np.float64,
+            )
+            if (
+                anchor_points.shape == (2, 2)
+                and np.all(np.isfinite(anchor_points))
+            ):
+                contact_hint_points_px = np.column_stack(
+                    (
+                        anchor_points[:, 0] / scale_x,
+                        (
+                            height_phys - anchor_points[:, 1]
+                        ) / scale_y,
+                    )
+                )
+        except (TypeError, ValueError):
+            contact_hint_points_px = None
 
     blurred = cv2.GaussianBlur(image, (7, 7), 0)
     masked_image = blurred.copy()
@@ -1025,6 +1252,17 @@ def auto_detect_edge_points(
             continue
         valid = clearance > clearance_margin
         arc = _longest_valid_contour_arc(contour_points, valid)
+        if arc is None or len(arc) < 5:
+            continue
+        arc = _trim_contour_to_liquid_cap(
+            arc,
+            (a_line, b_line, c_line),
+            scale_x,
+            scale_y,
+            height_phys,
+            margin_pixels,
+            contact_hint_points_px,
+        )
         if arc is None or len(arc) < 5:
             continue
 

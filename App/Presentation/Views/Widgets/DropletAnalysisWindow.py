@@ -5,16 +5,16 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QGroupBox, QSplitter, QRadioButton,
-    QTextEdit, QMessageBox, QButtonGroup, QInputDialog, QComboBox
+    QTextEdit, QMessageBox, QButtonGroup, QInputDialog, QComboBox, QMenu
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
-from PyQt6.QtGui import QPixmap, QIcon
+from PyQt6.QtGui import QPixmap, QIcon, QCursor
 
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from matplotlib.patches import Arc, FancyArrowPatch
+from matplotlib.patches import Arc, FancyArrowPatch, Rectangle
 
 from App.Models.Analysis.AnalysisManager import AnalysisManager
 from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet, resource_path
@@ -54,9 +54,13 @@ class DropletAnalysisWindow(QMainWindow):
 
     _instances = []
     MEASURE_THRESHOLD = 0.02
+    SELECTION_DRAG_THRESHOLD_PX = 5
 
     def __init__(self, view_model, pixmap, parent=None, source_image_path=None, item_path=None):
-        super().__init__(parent)
+        # Retain Qt ownership through parent, but make this an OS-managed
+        # top-level window. Without Qt.Window, minimizing several analysis
+        # windows stacks their compact title bars at the bottom of ImageEditor.
+        super().__init__(parent, Qt.WindowType.Window)
         DropletAnalysisWindow._instances.append(self)
 
         self.view_model = view_model
@@ -73,6 +77,7 @@ class DropletAnalysisWindow(QMainWindow):
         self.resize(1100, 760)
         self.setMinimumSize(700, 500)
 
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setObjectName("DropletAnalysisWindow")
 
@@ -99,6 +104,13 @@ class DropletAnalysisWindow(QMainWindow):
         self.is_measuring = False
         self.measurement_points = []
         self.measurement_artists = []
+        self.selected_measurement_indices = set()
+        self.selection_rect_artist = None
+        self.selection_start_point = None
+        self.selection_start_canvas = None
+        self.pending_measure_click = None
+        self.pending_measure_click_canvas = None
+        self.is_selecting_measurement_points = False
         self.crosshair_lines = []
         self.dragging_point_index = -1
 
@@ -544,6 +556,7 @@ class DropletAnalysisWindow(QMainWindow):
     def update_display(self):
         try:
             self.figure.clear()
+            self.selection_rect_artist = None
             self.ax = self.figure.add_subplot(111)
 
             if self.show_original:
@@ -696,26 +709,208 @@ class DropletAnalysisWindow(QMainWindow):
                 pass
         self.measurement_artists.clear()
 
+    def _sync_selected_measurement_indices(self):
+        max_index = len(self.measurement_points) - 1
+        self.selected_measurement_indices = {
+            idx for idx in self.selected_measurement_indices
+            if 0 <= idx <= max_index
+        }
+
+    def _clear_measurement_selection(self, redraw=True):
+        self.selected_measurement_indices.clear()
+        self._remove_selection_rectangle(redraw=False)
+        if redraw:
+            self._draw_measurement_points()
+
+    def _set_selected_measurement_indices(self, indices, redraw=True):
+        valid_indices = {
+            int(idx) for idx in indices
+            if 0 <= int(idx) < len(self.measurement_points)
+        }
+        self.selected_measurement_indices = valid_indices
+        if redraw:
+            self._draw_measurement_points()
+
+    def _delete_selected_measurement_points(self):
+        if not self.selected_measurement_indices:
+            return False
+
+        delete_indices = set(self.selected_measurement_indices)
+        self.measurement_points = [
+            point for idx, point in enumerate(self.measurement_points)
+            if idx not in delete_indices
+        ]
+        deleted_count = len(delete_indices)
+        self.selected_measurement_indices.clear()
+        self._remove_selection_rectangle(redraw=False)
+        self._draw_measurement_points()
+        self.update_info_text(f"Deleted {deleted_count} selected measure point(s).")
+        return True
+
     def _draw_measurement_points(self):
         if self.ax is None:
             return
 
         self._clear_measurement_artists()
+        self._sync_selected_measurement_indices()
         for idx, (x, y) in enumerate(self.measurement_points):
+            is_selected = idx in self.selected_measurement_indices
             point = self.ax.plot(
                 x, y,
                 marker='o',
                 linestyle='None',
-                markersize=5.5,
-                markerfacecolor=self.overlay_cfg["measure_point_color"],
-                markeredgecolor='white',
-                markeredgewidth=0.8,
-                zorder=9
+                markersize=6.4 if is_selected else 5.5,
+                markerfacecolor='#111111' if is_selected else self.overlay_cfg["measure_point_color"],
+                markeredgecolor='#ffd966' if is_selected else 'white',
+                markeredgewidth=1.15 if is_selected else 0.8,
+                zorder=10 if is_selected else 9
             )[0]
             point._point_index = idx
             self.measurement_artists.append(point)
 
         self.canvas.draw_idle()
+
+    def _remove_selection_rectangle(self, redraw=True):
+        if self.selection_rect_artist is not None:
+            try:
+                self.selection_rect_artist.remove()
+            except Exception:
+                pass
+            self.selection_rect_artist = None
+        if redraw and self.ax is not None:
+            self.canvas.draw_idle()
+
+    def _event_data_position(self, event):
+        if self.ax is None:
+            return None
+
+        xdata = getattr(event, "xdata", None)
+        ydata = getattr(event, "ydata", None)
+        if xdata is not None and ydata is not None and np.isfinite(xdata) and np.isfinite(ydata):
+            return float(xdata), float(ydata)
+
+        x = getattr(event, "x", None)
+        y = getattr(event, "y", None)
+        if x is None or y is None:
+            return None
+
+        try:
+            xdata, ydata = self.ax.transData.inverted().transform((x, y))
+        except Exception:
+            return None
+
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        xdata = min(max(float(xdata), min(xlim)), max(xlim))
+        ydata = min(max(float(ydata), min(ylim)), max(ylim))
+        return xdata, ydata
+
+    def _canvas_drag_distance(self, event):
+        if self.pending_measure_click_canvas is None:
+            return 0.0
+
+        x = getattr(event, "x", None)
+        y = getattr(event, "y", None)
+        if x is None or y is None:
+            return 0.0
+
+        start_x, start_y = self.pending_measure_click_canvas
+        return float(np.hypot(x - start_x, y - start_y))
+
+    def _draw_selection_rectangle(self, start_point, end_point):
+        if self.ax is None or start_point is None or end_point is None:
+            return
+
+        self._remove_selection_rectangle(redraw=False)
+        x0, y0 = start_point
+        x1, y1 = end_point
+        xmin, xmax = sorted((x0, x1))
+        ymin, ymax = sorted((y0, y1))
+        self.selection_rect_artist = Rectangle(
+            (xmin, ymin),
+            xmax - xmin,
+            ymax - ymin,
+            facecolor="#111111",
+            edgecolor="#ffd966",
+            linewidth=1.1,
+            linestyle="--",
+            alpha=0.22,
+            zorder=8,
+        )
+        self.ax.add_patch(self.selection_rect_artist)
+        self.canvas.draw_idle()
+
+    def _select_measurement_points_in_rect(self, start_point, end_point):
+        if start_point is None or end_point is None:
+            return
+
+        x0, y0 = start_point
+        x1, y1 = end_point
+        xmin, xmax = sorted((x0, x1))
+        ymin, ymax = sorted((y0, y1))
+
+        indices = [
+            idx for idx, (px, py) in enumerate(self.measurement_points)
+            if xmin <= px <= xmax and ymin <= py <= ymax
+        ]
+        self._remove_selection_rectangle(redraw=False)
+        self._set_selected_measurement_indices(indices)
+        if indices:
+            self.update_info_text(
+                f"Selected {len(indices)} measure point(s). Right-click selection to delete."
+            )
+        else:
+            self.update_info_text("No measure points selected.")
+
+    def _find_measurement_point_at_event(self, event):
+        for artist in self.measurement_artists:
+            if hasattr(artist, 'contains') and callable(artist.contains):
+                contains, _ = artist.contains(event)
+                if contains and hasattr(artist, '_point_index'):
+                    idx = artist._point_index
+                    if 0 <= idx < len(self.measurement_points):
+                        return idx
+
+        pos = self._event_data_position(event)
+        if pos is None:
+            return None
+
+        x, y = pos
+        idx_to_select = None
+        best_distance = None
+        for idx, (px, py) in enumerate(self.measurement_points):
+            dist = np.hypot(px - x, py - y)
+            if dist < self.MEASURE_THRESHOLD and (best_distance is None or dist < best_distance):
+                idx_to_select = idx
+                best_distance = dist
+        return idx_to_select
+
+    def _event_global_pos(self, event):
+        gui_event = getattr(event, "guiEvent", None)
+        if gui_event is not None:
+            if hasattr(gui_event, "globalPosition"):
+                return gui_event.globalPosition().toPoint()
+            if hasattr(gui_event, "globalPos"):
+                return gui_event.globalPos()
+        return QCursor.pos()
+
+    def _show_measurement_selection_menu(self, event):
+        if not self.selected_measurement_indices:
+            return False
+
+        menu = QMenu(self)
+        delete_action = menu.addAction("Delete")
+        selected_action = menu.exec(self._event_global_pos(event))
+        if selected_action == delete_action:
+            self._delete_selected_measurement_points()
+        return True
+
+    def _reset_pending_measure_selection(self):
+        self.pending_measure_click = None
+        self.pending_measure_click_canvas = None
+        self.selection_start_point = None
+        self.selection_start_canvas = None
+        self.is_selecting_measurement_points = False
 
     # =========================
     # crosshair
@@ -1042,6 +1237,9 @@ class DropletAnalysisWindow(QMainWindow):
             self.update_info_text("Measure mode: click to add profile points.")
         else:
             self.is_measuring = False
+            self.dragging_point_index = -1
+            self._reset_pending_measure_selection()
+            self._clear_measurement_selection(redraw=True)
             self.update_info_text("")
 
     @pyqtSlot()
@@ -1074,10 +1272,16 @@ class DropletAnalysisWindow(QMainWindow):
                 physical_width=5.0,
                 physical_height=3.0,
                 baseline_coeffs=baseline_coeffs,
+                baseline_anchor_points=baseline_anchor_points,
             )
 
         image_array = self.view_model.image_array.copy()
         baseline_coeffs = tuple(self.baseline_coeffs)
+        baseline_anchor_points = (
+            tuple(tuple(point) for point in self.baseline_anchor_points)
+            if self.baseline_anchor_points is not None
+            else None
+        )
         self.btn_auto_detect.setEnabled(False)
         self.update_info_text("Detecting droplet edge...")
         self._start_analysis_worker(detect_edges, self._on_edges_detected)
@@ -1087,6 +1291,7 @@ class DropletAnalysisWindow(QMainWindow):
         if not new_points:
             QMessageBox.warning(self, "No Edges", "No edges detected.")
             return
+        self._clear_measurement_selection(redraw=False)
         self.measurement_points = new_points
         self._draw_measurement_points()
         self.update_info_text(
@@ -1114,11 +1319,18 @@ class DropletAnalysisWindow(QMainWindow):
         QMessageBox.critical(self, "Analysis Error", message)
 
     def on_mouse_press(self, event):
-        if event.dblclick and event.button == 3 and (self.is_measuring or self.is_baseline_mode) and event.inaxes:
+        if event.button == 3 and self.is_measuring and event.inaxes:
+            idx = self._find_measurement_point_at_event(event)
+            if idx is not None and idx not in self.selected_measurement_indices:
+                self._set_selected_measurement_indices([idx])
+            if self._show_measurement_selection_menu(event):
+                return
+
+        if event.dblclick and event.button == 3 and self.is_baseline_mode and event.inaxes:
             x, y = event.xdata, event.ydata
             threshold = self.MEASURE_THRESHOLD
-            points_list = self.measurement_points if self.is_measuring else self.baseline_points
-            artists_list = self.measurement_artists if self.is_measuring else self.baseline_artists
+            points_list = self.baseline_points
+            artists_list = self.baseline_artists
 
             for artist in artists_list:
                 if hasattr(artist, 'contains') and callable(artist.contains):
@@ -1127,10 +1339,7 @@ class DropletAnalysisWindow(QMainWindow):
                         idx = artist._point_index
                         if 0 <= idx < len(points_list):
                             del points_list[idx]
-                            if self.is_measuring:
-                                self._draw_measurement_points()
-                            else:
-                                self._draw_baseline_points()
+                            self._draw_baseline_points()
                             return
 
             idx_to_remove = None
@@ -1142,15 +1351,31 @@ class DropletAnalysisWindow(QMainWindow):
 
             if idx_to_remove is not None:
                 del points_list[idx_to_remove]
-                if self.is_measuring:
-                    self._draw_measurement_points()
-                else:
-                    self._draw_baseline_points()
+                self._draw_baseline_points()
             return
 
-        if event.button == 1 and (self.is_measuring or self.is_baseline_mode) and event.inaxes:
+        if event.button == 1 and self.is_measuring and event.inaxes:
+            data_pos = self._event_data_position(event)
+            if data_pos is None:
+                return
+
+            idx = self._find_measurement_point_at_event(event)
+            if idx is not None:
+                self.dragging_point_index = idx
+                if idx not in self.selected_measurement_indices:
+                    self._clear_measurement_selection(redraw=True)
+                return
+
+            self.pending_measure_click = data_pos
+            self.pending_measure_click_canvas = (event.x, event.y)
+            self.selection_start_point = data_pos
+            self.selection_start_canvas = (event.x, event.y)
+            self.is_selecting_measurement_points = False
+            return
+
+        if event.button == 1 and self.is_baseline_mode and event.inaxes:
             x, y = event.xdata, event.ydata
-            points_list = self.measurement_points if self.is_measuring else self.baseline_points
+            points_list = self.baseline_points
             threshold = self.MEASURE_THRESHOLD
 
             for i, (px, py) in enumerate(points_list):
@@ -1160,10 +1385,7 @@ class DropletAnalysisWindow(QMainWindow):
                     return
 
             points_list.append((x, y))
-            if self.is_measuring:
-                self._draw_measurement_points()
-            else:
-                self._draw_baseline_points()
+            self._draw_baseline_points()
             return
 
         if event.button == 3 and event.inaxes:
@@ -1173,6 +1395,25 @@ class DropletAnalysisWindow(QMainWindow):
             self.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def on_mouse_release(self, event):
+        if event.button == 1 and self.is_measuring:
+            if self.dragging_point_index != -1:
+                self.dragging_point_index = -1
+                self._reset_pending_measure_selection()
+                return
+
+            if self.pending_measure_click is not None:
+                if self.is_selecting_measurement_points:
+                    end_point = self._event_data_position(event) or self.pending_measure_click
+                    self._select_measurement_points_in_rect(
+                        self.selection_start_point, end_point
+                    )
+                else:
+                    self._clear_measurement_selection(redraw=False)
+                    self.measurement_points.append(self.pending_measure_click)
+                    self._draw_measurement_points()
+                self._reset_pending_measure_selection()
+                return
+
         if event.button == 3:
             self.is_panning = False
             self.pan_start_x = None
@@ -1183,6 +1424,20 @@ class DropletAnalysisWindow(QMainWindow):
             self.dragging_point_index = -1
 
     def on_mouse_move(self, event):
+        if (
+            self.is_measuring
+            and self.pending_measure_click is not None
+            and self.dragging_point_index == -1
+        ):
+            data_pos = self._event_data_position(event)
+            if data_pos is None:
+                return
+            if self._canvas_drag_distance(event) >= self.SELECTION_DRAG_THRESHOLD_PX:
+                self.is_selecting_measurement_points = True
+                self._draw_selection_rectangle(self.selection_start_point, data_pos)
+                self._remove_crosshair()
+                return
+
         if self.dragging_point_index != -1 and event.inaxes:
             x, y = event.xdata, event.ydata
             if self.is_measuring:
@@ -1336,6 +1591,7 @@ Display:
 
         self._clear_analysis_artists()
 
+        self._clear_measurement_selection(redraw=False)
         self.measurement_points.clear()
         self._clear_measurement_artists()
         self.baseline_points.clear()
@@ -1454,6 +1710,7 @@ Display:
         self.last_analysis_results = results
         self._draw_analysis_results(results)
 
+        self._clear_measurement_selection(redraw=False)
         self.measurement_points.clear()
         self._clear_measurement_artists()
         self.canvas.draw_idle()
@@ -1461,6 +1718,10 @@ Display:
 
     @pyqtSlot()
     def on_delete_measure_point_clicked(self):
+        if self._delete_selected_measurement_points():
+            return
+
+        self._clear_measurement_selection(redraw=False)
         self.measurement_points.clear()
         self._clear_measurement_artists()
         self.update_info_text("All measure points deleted.")

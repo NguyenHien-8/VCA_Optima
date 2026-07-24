@@ -21,7 +21,11 @@ class FileEditorWindow(QMainWindow):
     Uses QMainWindow so the OS window has minimize / maximize / close / resize.
     """
     def __init__(self, main_view, editor_widget, view_model):
-        super().__init__(main_view)
+        # A QMainWindow with a parent but without Qt.Window is treated as a
+        # child widget. On Windows, minimizing such a widget creates a compact
+        # title bar inside the parent's client area. Keep ownership through
+        # main_view while explicitly creating an OS-managed top-level window.
+        super().__init__(main_view, Qt.WindowType.Window)
         self.main_view = main_view
         self.editor_widget = editor_widget
         self.view_model = view_model

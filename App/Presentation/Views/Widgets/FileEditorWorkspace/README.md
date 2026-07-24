@@ -19,7 +19,8 @@ Các editor và control widget cho camera live, ảnh tĩnh, video đã lưu và
 - ImageEditor ngắt Matplotlib callbacks, clear figure và đóng analysis windows con.
 - VideoEditor disconnect video sink, bỏ media source và clear frame khi đóng.
 - Capture từ live camera hoặc VideoEditor đều phát explicit media notification; file tạo từ nguồn ngoài vẫn do watcher đồng bộ.
-- Droplet Auto Detect chỉ được kích hoạt sau khi có baseline; phân đoạn, lọc contour và lấy mẫu điểm chạy trong analysis worker nên không chặn UI thread.
+- Droplet Auto Detect chỉ được kích hoạt sau khi có baseline; phân đoạn, lọc substrate tails, khôi phục contact endpoints và lấy mẫu điểm chạy trong analysis worker nên không chặn UI thread.
+- ImageEditor mở Droplet Analysis dưới dạng owned top-level window (`parent` + `Qt.Window`), nên thu nhỏ cửa sổ không còn tạo các title bar con dồn ở đáy editor; đóng window sẽ xóa object và gỡ tham chiếu theo signal `destroyed`.
 
 ## Data Flow
 
@@ -28,4 +29,5 @@ Các editor và control widget cho camera live, ảnh tĩnh, video đã lưu và
 3. Record frames → recorder queue → MP4 finalize → `media_created(Video)` → SideBar.
 4. VideoEditor capture frame → background PNG save → `media_created(Image)` → SideBar.
 5. Sidebar image/video file → MainView → ImageEditor/VideoEditor.
-6. ImageEditor → DropletAnalysisWindow → baseline coefficients + image → analysis worker → các điểm biên chỉ nằm phía trên baseline → rendered result.
+6. ImageEditor → DropletAnalysisWindow → baseline coefficients/anchors + image → analysis worker → liquid-cap points cùng hai contact endpoints → rendered result.
+7. DropletAnalysisWindow minimize/maximize → OS window manager → hình học của ImageEditor/MainView không bị thay đổi.
