@@ -805,6 +805,7 @@ class MainView(QMainWindow):
                 editor_list.append({"project_name": project_name, "full_path": full_path})
 
         expanded_paths = self.sidebar.get_expanded_paths()
+        sidebar_order = self.sidebar.get_sidebar_order()
 
         if self.file_editor_window is not None:
             self.file_editor_window.close()
@@ -839,7 +840,11 @@ class MainView(QMainWindow):
             event.ignore()
             return
         self.view_model.hardware_manager.cleanup()
-        self.view_model.save_session_with_editors(editor_list, expanded_paths)
+        self.view_model.save_session_with_editors(
+            editor_list,
+            expanded_paths,
+            sidebar_order,
+        )
 
         event.accept()
 

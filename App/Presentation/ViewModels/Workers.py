@@ -75,6 +75,19 @@ class SessionRestoreWorker(QThread):
         try:
             self._session_manager.load_all()
             projects = []
+            sidebar_order = self._session_manager.get_sidebar_order()
+            saved_project_paths = sidebar_order.get("projects", [])
+            project_rank = {
+                os.path.normcase(os.path.normpath(path)): index
+                for index, path in enumerate(saved_project_paths)
+                if isinstance(path, str)
+            }
+            saved_item_orders = sidebar_order.get("items", {})
+            normalized_item_orders = {
+                os.path.normcase(os.path.normpath(project_path)): item_names
+                for project_path, item_names in saved_item_orders.items()
+                if isinstance(project_path, str) and isinstance(item_names, list)
+            }
 
             for raw_path in self._session_manager.get_open_projects():
                 if self.isInterruptionRequested():
@@ -107,18 +120,47 @@ class SessionRestoreWorker(QThread):
                     )
                     continue
 
+                saved_item_order = normalized_item_orders.get(
+                    os.path.normcase(os.path.normpath(path)),
+                    [],
+                )
+                item_rank = {
+                    item_name.casefold(): index
+                    for index, item_name in enumerate(saved_item_order)
+                    if isinstance(item_name, str)
+                }
+                items.sort(
+                    key=lambda item_name: (
+                        item_name.casefold() not in item_rank,
+                        item_rank.get(item_name.casefold(), 0),
+                        item_name.casefold(),
+                    )
+                )
+
                 projects.append({
                     "name": project_name,
                     "path": path,
                     "state": "TEMP" if is_temp else "SAVED",
-                    "items": sorted(items, key=str.casefold),
+                    "items": items,
                 })
+
+            projects.sort(
+                key=lambda project: (
+                    os.path.normcase(os.path.normpath(project["path"]))
+                    not in project_rank,
+                    project_rank.get(
+                        os.path.normcase(os.path.normpath(project["path"])),
+                        0,
+                    ),
+                )
+            )
 
             result = {
                 "projects": projects,
                 "opened_items": self._session_manager.get_opened_items(),
                 "editors": self._session_manager.get_open_editors(),
                 "expanded_paths": self._session_manager.get_expanded_paths(),
+                "sidebar_order": sidebar_order,
             }
             if not self.isInterruptionRequested():
                 self.restored.emit(result)

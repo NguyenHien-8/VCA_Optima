@@ -19,6 +19,7 @@
 - `FunctionWorker`, các worker chuyên biệt và Qt queued signals đưa tác vụ blocking ra khỏi UI thread.
 - Camera, recorder, filesystem scanner và editor sử dụng cooperative shutdown; `finished` kết hợp `deleteLater()` để giải phóng đúng vòng đời.
 - SideBar dò nội dung `Image/Video` bằng hàng đợi scanner nền giới hạn đồng thời; branch indicator phản ánh nội dung thật mà không cần click để kích hoạt lazy load.
+- SideBar hỗ trợ kéo-thả sắp xếp Project và Item: MIME nội bộ phân loại node, chỉ cho phép Project đổi vị trí ở root và Item đổi vị trí trong cùng Project; thứ tự path-stable được lưu trong session.
 - Droplet Auto Detect dùng baseline làm ràng buộc hình học: mask bỏ substrate/reflection, cắt contour tails có clearance thấp, kiểm tra hai baseline anchors làm contact hints và lấy mẫu liquid-cap arc đều theo arc length.
 - Droplet Measure Point hỗ trợ drag-select bằng selection rectangle: point được chọn được render màu đen, menu chuột phải chỉ hiện `Delete` khi có selection hợp lệ, và xóa theo index đã chọn trước khi dựng lại overlay.
 - `WindowOwnershipHelper` chuẩn hóa secondary-window policy: owner luôn là top-level `MainView`, Qt transient parent duy trì Z-order/minimize-restore theo owner, còn Win32 `WS_EX_APPWINDOW` giữ thumbnail của cửa sổ phụ trong nhóm taskbar. Runtime và shortcut installer dùng chung AppUserModelID `TNH.Optima`.
@@ -34,8 +35,9 @@
 3. Worker trả kết quả bằng signal về UI thread.
 4. Capture/record thành công phát `media_created` → SideBar cập nhật ngay; `QFileSystemWatcher` vẫn đồng bộ thay đổi từ bên ngoài.
 5. Media scan nền cập nhật cache và `ChildIndicatorPolicy`; khi người dùng mở node, danh sách cache được render ngay.
-6. Trong Droplet Analysis, baseline coefficients/anchors + image đi qua worker → liquid-cap contour + contact endpoints → ellipse/circle fit → overlay và contact angles.
-7. Trong chế độ Measure Point, click vùng trống thêm point, drag vùng trống tạo selection rectangle, chuột phải selection → `Delete` → rebuild overlay từ danh sách point còn lại.
-8. Startup đặt process AppUserModelID → mở File Editor/Droplet Analysis → gán MainView làm transient owner → áp dụng taskbar style → Windows gom thumbnail dưới một biểu tượng TNH Optima.
-9. MainView minimize/restore → Windows phối hợp các owned windows; chọn thumbnail cửa sổ phụ → khôi phục/activate đúng window mà không tạo caption thu nhỏ trên desktop.
-10. Khi đóng, editor chờ worker hoàn tất theo tín hiệu, sau đó giải phóng camera, serial, multimedia, Matplotlib và lưu session.
+6. Giữ chuột trái Project/Item → kéo tới vị trí hợp lệ → tree di chuyển nguyên node → khi đóng lưu `sidebar_order` → restore worker dựng lại đúng thứ tự.
+7. Trong Droplet Analysis, baseline coefficients/anchors + image đi qua worker → liquid-cap contour + contact endpoints → ellipse/circle fit → overlay và contact angles.
+8. Trong chế độ Measure Point, click vùng trống thêm point, drag vùng trống tạo selection rectangle, chuột phải selection → `Delete` → rebuild overlay từ danh sách point còn lại.
+9. Startup đặt process AppUserModelID → mở File Editor/Droplet Analysis → gán MainView làm transient owner → áp dụng taskbar style → Windows gom thumbnail dưới một biểu tượng TNH Optima.
+10. MainView minimize/restore → Windows phối hợp các owned windows; chọn thumbnail cửa sổ phụ → khôi phục/activate đúng window mà không tạo caption thu nhỏ trên desktop.
+11. Khi đóng, editor chờ worker hoàn tất theo tín hiệu, sau đó giải phóng camera, serial, multimedia, Matplotlib và lưu session.

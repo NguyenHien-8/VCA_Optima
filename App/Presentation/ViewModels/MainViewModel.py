@@ -124,14 +124,17 @@ class MainViewModel(QObject):
             self.project_manager.project_states[name] = project.get("state", "SAVED")
             self.project_added.emit(name, path)
 
-            all_items = set(project.get("items", []))
+            ordered_items = list(project.get("items", []))
+            all_items = set(ordered_items)
             visible_items = saved_opened_items.get(name)
             if visible_items is None:
                 visible_items = all_items
             else:
                 visible_items = all_items.intersection(visible_items)
 
-            for item_name in sorted(visible_items, key=str.casefold):
+            for item_name in ordered_items:
+                if item_name not in visible_items:
+                    continue
                 self.item_added.emit(name, item_name, os.path.join(path, item_name))
                 self._add_opened_item(name, item_name)
 
@@ -153,13 +156,47 @@ class MainViewModel(QObject):
     def get_expanded_paths(self) -> List[str]:
         return self.session_manager.get_expanded_paths()
 
-    def save_session_with_editors(self, editor_list, expanded_paths):
+    def save_session_with_editors(
+        self,
+        editor_list,
+        expanded_paths,
+        sidebar_order=None,
+    ):
         try:
-            project_paths = list(self.project_manager.current_projects.values())
+            current_paths = list(self.project_manager.current_projects.values())
+            current_by_norm = {
+                os.path.normcase(os.path.normpath(path)): path
+                for path in current_paths
+            }
+            requested_paths = (
+                sidebar_order.get("projects", [])
+                if isinstance(sidebar_order, dict)
+                else []
+            )
+            project_paths = []
+            seen_paths = set()
+            for requested_path in requested_paths:
+                if (
+                    not isinstance(requested_path, str)
+                    or not requested_path.strip()
+                ):
+                    continue
+                norm_path = os.path.normcase(os.path.normpath(requested_path))
+                actual_path = current_by_norm.get(norm_path)
+                if actual_path is not None and norm_path not in seen_paths:
+                    project_paths.append(actual_path)
+                    seen_paths.add(norm_path)
+            for current_path in current_paths:
+                norm_path = os.path.normcase(os.path.normpath(current_path))
+                if norm_path not in seen_paths:
+                    project_paths.append(current_path)
+                    seen_paths.add(norm_path)
+
             self.session_manager.set_open_projects(project_paths)
             self.session_manager.set_open_editors(editor_list)
             self.session_manager.set_expanded_paths(expanded_paths)
             self.session_manager.set_opened_items(self.opened_items)
+            self.session_manager.set_sidebar_order(sidebar_order)
             self.session_manager.save_all()
             return True
         except Exception:

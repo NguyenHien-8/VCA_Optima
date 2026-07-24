@@ -19,6 +19,7 @@ ViewModels kết nối Views với Models, quản lý worker và phát các sign
 - Worker được track, request interruption khi đóng và `deleteLater()` sau `finished`.
 - Timer trì hoãn có parent và được hủy trong shutdown.
 - File loader giới hạn 20 MB và từ chối binary/non-UTF-8.
+- Session restore xếp Project theo normalized path rank và Item theo case-insensitive saved rank; node mới hoặc thiếu metadata được đặt sau theo thứ tự tên ổn định.
 
 ## Data Flow
 
@@ -27,3 +28,4 @@ ViewModels kết nối Views với Models, quản lý worker và phát các sign
 3. Result signal gọi callback trên UI thread rồi cập nhật View.
 4. `FileEditorViewModel.media_created` mang project, item, media type và full path đến SideBar.
 5. Shutdown chỉ hoàn tất khi các worker liên quan đã dừng.
+6. MainView snapshot `sidebar_order` → MainViewModel lọc các Project còn tồn tại → SessionManager lưu → SessionRestoreWorker trả Project/Item theo đúng thứ tự.

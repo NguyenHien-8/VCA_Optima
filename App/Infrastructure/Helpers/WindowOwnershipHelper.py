@@ -1,3 +1,4 @@
+# App/Infrastructure/Helpers/WindowOwnershipHelper.py
 import ctypes
 import logging
 import sys

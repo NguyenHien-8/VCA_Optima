@@ -1,22 +1,105 @@
+import json
 import os
 from PyQt6.QtWidgets import (QDockWidget, QTabWidget, QWidget, QVBoxLayout,
                              QTreeWidget, QTreeWidgetItem, QMenu, QAbstractItemView, QStyle)
 from PyQt6.QtGui import QDrag, QIcon
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QMimeData, QFileSystemWatcher, QSize, QTimer
+from PyQt6.QtCore import (
+    Qt, pyqtSignal, pyqtSlot, QMimeData, QFileSystemWatcher, QSize, QTimer,
+    QByteArray,
+)
 
 from App.Infrastructure.Helpers.ResourceHelper import resource_path
 from App.Presentation.ViewModels.Workers import FunctionWorker
 
 
 class DraggableTreeWidget(QTreeWidget):
+    INTERNAL_NODE_MIME = "application/x-tnh-optima-sidebar-node"
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragEnabled(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropOverwriteMode(False)
+        self.setAutoScroll(True)
+        self.setAutoScrollMargin(24)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self._dragged_tree_item = None
+
+    @staticmethod
+    def _node_kind(item):
+        if item is None:
+            return None
+        parent = item.parent()
+        if parent is None:
+            return "PROJECT"
+        if parent.parent() is None:
+            return "ITEM"
+        if (
+            parent.text(0) in ("Image", "Video")
+            and parent.parent() is not None
+            and parent.parent().parent() is not None
+            and parent.parent().parent().parent() is None
+        ):
+            return "FILE"
+        return None
+
+    @staticmethod
+    def _project_item_of(item):
+        current = item
+        while current is not None and current.parent() is not None:
+            current = current.parent()
+        return current
+
+    @staticmethod
+    def _direct_item_of(item):
+        if item is None:
+            return None
+        project_item = DraggableTreeWidget._project_item_of(item)
+        current = item
+        while current is not None and current.parent() is not project_item:
+            current = current.parent()
+        return current if current is not project_item else None
+
+    def _internal_drag_payload(self, item, kind):
+        project_item = self._project_item_of(item)
+        payload = {
+            "kind": kind,
+            "project_path": project_item.data(
+                0, Qt.ItemDataRole.UserRole
+            ) if project_item is not None else None,
+        }
+        if kind == "ITEM":
+            payload["item_path"] = item.data(0, Qt.ItemDataRole.UserRole)
+        return QByteArray(json.dumps(payload).encode("utf-8"))
 
     def startDrag(self, supportedActions):
         item = self.currentItem()
-        if not item or item.childCount() > 0:
+        kind = self._node_kind(item)
+        if item is None or kind is None:
+            return
+
+        if kind in ("PROJECT", "ITEM"):
+            # Include Qt's model MIME so QAbstractItemView can calculate and
+            # paint its native above/below drop indicator. The custom MIME is
+            # still the authority used by our constrained drop handler.
+            mime_data = self.mimeData([item])
+            mime_data.setData(
+                self.INTERNAL_NODE_MIME,
+                self._internal_drag_payload(item, kind),
+            )
+            drag = QDrag(self)
+            drag.setMimeData(mime_data)
+            self._dragged_tree_item = item
+            try:
+                drag.exec(Qt.DropAction.MoveAction)
+            finally:
+                self._dragged_tree_item = None
+            return
+
+        # Media files keep the existing copy-drag contract used by the editor.
+        if kind != "FILE" or item.childCount() > 0:
             return
 
         temp = item
@@ -37,6 +120,151 @@ class DraggableTreeWidget(QTreeWidget):
         drag = QDrag(self)
         drag.setMimeData(mime_data)
         drag.exec(Qt.DropAction.CopyAction)
+
+    def dragEnterEvent(self, event):
+        if (
+            event.source() is self
+            and event.mimeData().hasFormat(self.INTERNAL_NODE_MIME)
+        ):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event):
+        # Let QAbstractItemView update dropIndicatorPosition/autoscroll first,
+        # then enforce the Project/Item hierarchy rules.
+        super().dragMoveEvent(event)
+        if self._can_drop_internal_at(event.position().toPoint()):
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+            return
+        event.ignore()
+
+    def dropEvent(self, event):
+        if not (
+            event.source() is self
+            and event.mimeData().hasFormat(self.INTERNAL_NODE_MIME)
+        ):
+            event.ignore()
+            return
+
+        source = self._dragged_tree_item
+        target = self.itemAt(event.position().toPoint())
+        if (
+            source is None
+            or source.treeWidget() is not self
+            or not self._can_drop_internal_at(event.position().toPoint())
+        ):
+            event.ignore()
+            return
+
+        self._move_internal_item(
+            source,
+            target,
+            self.dropIndicatorPosition(),
+        )
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+
+    def _can_drop_internal_at(self, pos):
+        source = self._dragged_tree_item
+        if source is None or source.treeWidget() is not self:
+            return False
+
+        kind = self._node_kind(source)
+        target = self.itemAt(pos)
+        if kind == "PROJECT":
+            return target is None or self._project_item_of(target) is not None
+        if kind != "ITEM":
+            return False
+        if target is None:
+            return False
+        return self._project_item_of(target) is source.parent()
+
+    @staticmethod
+    def _insert_after_drop_position(drop_position):
+        return drop_position in (
+            QAbstractItemView.DropIndicatorPosition.OnItem,
+            QAbstractItemView.DropIndicatorPosition.BelowItem,
+        )
+
+    def _move_internal_item(self, source, target, drop_position):
+        kind = self._node_kind(source)
+        if kind == "PROJECT":
+            target_project = self._project_item_of(target)
+            return self._move_project(
+                source,
+                target_project,
+                self._insert_after_drop_position(drop_position),
+            )
+        if kind == "ITEM":
+            return self._move_item(
+                source,
+                target,
+                drop_position,
+            )
+        return False
+
+    def _move_project(self, source, target_project, insert_after):
+        source_index = self.indexOfTopLevelItem(source)
+        if source_index < 0:
+            return False
+
+        if target_project is None:
+            insert_index = self.topLevelItemCount()
+        else:
+            target_index = self.indexOfTopLevelItem(target_project)
+            if target_index < 0:
+                return False
+            insert_index = target_index + (1 if insert_after else 0)
+
+        if source_index < insert_index:
+            insert_index -= 1
+        if insert_index == source_index:
+            return False
+
+        moved_item = self.takeTopLevelItem(source_index)
+        self.insertTopLevelItem(insert_index, moved_item)
+        self.setCurrentItem(moved_item)
+        self.scrollToItem(moved_item)
+        return True
+
+    def _move_item(self, source, target, drop_position):
+        project_item = source.parent()
+        if project_item is None:
+            return False
+
+        if target is None:
+            target_item = None
+            insert_index = project_item.childCount()
+        else:
+            if self._project_item_of(target) is not project_item:
+                return False
+            target_item = self._direct_item_of(target)
+            if target_item is None:
+                insert_index = project_item.childCount()
+            else:
+                target_index = project_item.indexOfChild(target_item)
+                if target_index < 0:
+                    return False
+                insert_index = target_index + (
+                    1 if self._insert_after_drop_position(drop_position) else 0
+                )
+
+        source_index = project_item.indexOfChild(source)
+        if source_index < 0:
+            return False
+        if source_index < insert_index:
+            insert_index -= 1
+        if insert_index == source_index:
+            return False
+
+        moved_item = project_item.takeChild(source_index)
+        project_item.insertChild(insert_index, moved_item)
+        self.setCurrentItem(moved_item)
+        self.scrollToItem(moved_item)
+        return True
 
     def drawBranches(self, painter, rect, index):
         item = self.itemFromIndex(index)
@@ -879,6 +1107,25 @@ class ProjectSidebar(QDockWidget):
             if folder_node is None:
                 return project_name, None, 'PROJECT'
         return project_name, folder_node.text(0), 'ITEM'
+
+    def get_sidebar_order(self):
+        """Return path-stable Project order and per-Project Item order."""
+        project_paths = []
+        item_orders = {}
+        for project_index in range(self.project_tree.topLevelItemCount()):
+            project_item = self.project_tree.topLevelItem(project_index)
+            project_path = project_item.data(0, Qt.ItemDataRole.UserRole)
+            if not isinstance(project_path, str) or not project_path.strip():
+                continue
+            project_paths.append(project_path)
+            item_orders[project_path] = [
+                project_item.child(item_index).text(0)
+                for item_index in range(project_item.childCount())
+            ]
+        return {
+            "projects": project_paths,
+            "items": item_orders,
+        }
 
     def get_expanded_paths(self):
         paths = []
