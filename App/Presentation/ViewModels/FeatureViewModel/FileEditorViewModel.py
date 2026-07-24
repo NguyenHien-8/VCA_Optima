@@ -308,4 +308,8 @@ class FileEditorViewModel(QObject):
                 f"Could not close media resources: {exc}"
             )
         self._close_ready_emitted = True
-        QTimer.singleShot(0, self.close_ready.emit)
+        # Emit while this QObject is still alive. Scheduling the bound
+        # signal's emit method can leave a callback behind after the
+        # FileEditorViewModel has been deleted, which makes PyQt raise:
+        # "does not have a signal with the signature close_ready()".
+        self.close_ready.emit()

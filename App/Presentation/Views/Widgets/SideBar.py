@@ -1,19 +1,58 @@
 import json
 import os
 from PyQt6.QtWidgets import (QDockWidget, QTabWidget, QWidget, QVBoxLayout,
-                             QTreeWidget, QTreeWidgetItem, QMenu, QAbstractItemView, QStyle)
-from PyQt6.QtGui import QDrag, QIcon
+                             QTreeWidget, QTreeWidgetItem, QMenu, QAbstractItemView, QStyle, QProxyStyle)
+from PyQt6.QtGui import QDrag, QIcon, QColor
 from PyQt6.QtCore import (
     Qt, pyqtSignal, pyqtSlot, QMimeData, QFileSystemWatcher, QSize, QTimer,
-    QByteArray,
+    QByteArray, QRect,
 )
 
 from App.Infrastructure.Helpers.ResourceHelper import resource_path
 from App.Presentation.ViewModels.Workers import FunctionWorker
 
 
+class DropIndicatorProxyStyle(QProxyStyle):
+    """Custom style dùng để đổi màu và vẽ thanh drop indicator đúng vị trí."""
+
+    def __init__(self, base_style=None, color="#0078D7", height=3):
+        super().__init__(base_style)
+        self._drop_indicator_color = QColor(color)
+        self._drop_indicator_height = max(1, int(height))
+
+    @staticmethod
+    def _owner_view(widget):
+        current = widget
+        while current is not None:
+            if hasattr(current, "_custom_drop_indicator_rect"):
+                return current
+            current = current.parent()
+        return None
+
+    def drawPrimitive(self, element, option, painter, widget=None):
+        if element == QStyle.PrimitiveElement.PE_IndicatorItemViewItemDrop:
+            view = self._owner_view(widget)
+            rect = getattr(view, "_custom_drop_indicator_rect", QRect())
+
+            # Không cho Qt vẽ indicator native tại row Image/Video/File nữa.
+            # Chỉ vẽ khi DraggableTreeWidget đã snap indicator về PROJECT hoặc ITEM hợp lệ.
+            if not rect.isValid():
+                return
+
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._drop_indicator_color)
+            painter.drawRect(rect)
+            painter.restore()
+            return
+
+        super().drawPrimitive(element, option, painter, widget)
+
+
 class DraggableTreeWidget(QTreeWidget):
     INTERNAL_NODE_MIME = "application/x-tnh-optima-sidebar-node"
+    DROP_INDICATOR_COLOR = "#0078D7"  # Xanh dương của thanh drop indicator
+    DROP_INDICATOR_HEIGHT = 3
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -25,6 +64,16 @@ class DraggableTreeWidget(QTreeWidget):
         self.setAutoScrollMargin(24)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+
+        self._custom_drop_indicator_rect = QRect()
+        self._custom_drop_target_item = None
+        self._custom_drop_position = None
+        self._drop_indicator_style = DropIndicatorProxyStyle(
+            self.style(),
+            self.DROP_INDICATOR_COLOR,
+            self.DROP_INDICATOR_HEIGHT,
+        )
+        self.setStyle(self._drop_indicator_style)
         self._dragged_tree_item = None
 
     @staticmethod
@@ -96,6 +145,7 @@ class DraggableTreeWidget(QTreeWidget):
                 drag.exec(Qt.DropAction.MoveAction)
             finally:
                 self._dragged_tree_item = None
+                self._clear_drop_indicator()
             return
 
         # Media files keep the existing copy-drag contract used by the editor.
@@ -132,55 +182,157 @@ class DraggableTreeWidget(QTreeWidget):
         event.ignore()
 
     def dragMoveEvent(self, event):
-        # Let QAbstractItemView update dropIndicatorPosition/autoscroll first,
-        # then enforce the Project/Item hierarchy rules.
-        super().dragMoveEvent(event)
-        if self._can_drop_internal_at(event.position().toPoint()):
-            event.setDropAction(Qt.DropAction.MoveAction)
-            event.accept()
+        pos = event.position().toPoint()
+        drop_info = self._drop_info_at(pos)
+        if drop_info is None:
+            self._clear_drop_indicator()
+            event.ignore()
             return
-        event.ignore()
+
+        target, drop_position = drop_info
+        self._set_drop_indicator(target, drop_position)
+
+        # Let QAbstractItemView keep autoscroll/drag state updated. The proxy
+        # style above will ignore Qt's raw indicator rect and use our snapped rect.
+        super().dragMoveEvent(event)
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+
+    def dragLeaveEvent(self, event):
+        self._clear_drop_indicator()
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event):
         if not (
             event.source() is self
             and event.mimeData().hasFormat(self.INTERNAL_NODE_MIME)
         ):
+            self._clear_drop_indicator()
             event.ignore()
             return
 
         source = self._dragged_tree_item
-        target = self.itemAt(event.position().toPoint())
-        if (
-            source is None
-            or source.treeWidget() is not self
-            or not self._can_drop_internal_at(event.position().toPoint())
-        ):
+        drop_info = self._drop_info_at(event.position().toPoint())
+        if source is None or source.treeWidget() is not self or drop_info is None:
+            self._clear_drop_indicator()
             event.ignore()
             return
 
-        self._move_internal_item(
-            source,
-            target,
-            self.dropIndicatorPosition(),
-        )
-        event.setDropAction(Qt.DropAction.MoveAction)
-        event.accept()
+        target, drop_position = drop_info
+        moved = self._move_internal_item(source, target, drop_position)
+        self._clear_drop_indicator()
 
-    def _can_drop_internal_at(self, pos):
+        if moved:
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def _clear_drop_indicator(self):
+        old_rect = QRect(self._custom_drop_indicator_rect)
+        self._custom_drop_indicator_rect = QRect()
+        self._custom_drop_target_item = None
+        self._custom_drop_position = None
+        if old_rect.isValid():
+            self.viewport().update(old_rect.adjusted(0, -4, 0, 4))
+
+    def _set_drop_indicator(self, target, drop_position):
+        new_rect = self._drop_indicator_rect_for(target, drop_position)
+        old_rect = QRect(self._custom_drop_indicator_rect)
+        self._custom_drop_indicator_rect = new_rect
+        self._custom_drop_target_item = target
+        self._custom_drop_position = drop_position
+
+        update_rect = QRect(new_rect)
+        if old_rect.isValid():
+            update_rect = update_rect.united(old_rect) if update_rect.isValid() else old_rect
+        if update_rect.isValid():
+            self.viewport().update(update_rect.adjusted(0, -4, 0, 4))
+
+    def _drop_indicator_rect_for(self, item, drop_position):
+        if item is None or item.treeWidget() is not self:
+            return QRect()
+
+        item_rect = self.visualItemRect(item)
+        if not item_rect.isValid():
+            return QRect()
+
+        line_height = max(1, self.DROP_INDICATOR_HEIGHT)
+        if drop_position == QAbstractItemView.DropIndicatorPosition.AboveItem:
+            center_y = item_rect.top()
+        else:
+            center_y = item_rect.bottom()
+
+        y = center_y - line_height // 2
+        return QRect(0, y, self.viewport().width(), line_height)
+
+    def _drop_position_for_item_rect(self, item, pos):
+        item_rect = self.visualItemRect(item)
+        if item_rect.isValid() and pos.y() < item_rect.center().y():
+            return QAbstractItemView.DropIndicatorPosition.AboveItem
+        return QAbstractItemView.DropIndicatorPosition.BelowItem
+
+    def _drop_info_at(self, pos):
         source = self._dragged_tree_item
         if source is None or source.treeWidget() is not self:
-            return False
+            return None
 
         kind = self._node_kind(source)
-        target = self.itemAt(pos)
         if kind == "PROJECT":
-            return target is None or self._project_item_of(target) is not None
-        if kind != "ITEM":
-            return False
+            return self._project_drop_info_at(source, pos)
+        if kind == "ITEM":
+            return self._item_drop_info_at(source, pos)
+        return None
+
+    def _project_drop_info_at(self, source, pos):
+        target = self.itemAt(pos)
         if target is None:
-            return False
-        return self._project_item_of(target) is source.parent()
+            if self.topLevelItemCount() == 0:
+                return None
+            target_project = self.topLevelItem(self.topLevelItemCount() - 1)
+            drop_position = QAbstractItemView.DropIndicatorPosition.BelowItem
+        else:
+            target_project = self._project_item_of(target)
+            if target_project is None:
+                return None
+            # Dù con trỏ đang nằm trên Item/Image/Video/File, indicator vẫn được
+            # snap về row PROJECT, không gạch ngang node con.
+            drop_position = self._drop_position_for_item_rect(target_project, pos)
+
+        if not self._project_move_would_change(source, target_project, drop_position):
+            return None
+        return target_project, drop_position
+
+    def _item_drop_info_at(self, source, pos):
+        project_item = source.parent()
+        if project_item is None:
+            return None
+
+        target = self.itemAt(pos)
+        if target is None or self._project_item_of(target) is not project_item:
+            return None
+
+        target_item = self._direct_item_of(target)
+        if target_item is None:
+            # Khi rê trên row Project cha, chỉ cho hiển thị ở dưới Item cuối cùng.
+            if project_item.childCount() == 0:
+                return None
+            target_item = project_item.child(project_item.childCount() - 1)
+            drop_position = QAbstractItemView.DropIndicatorPosition.BelowItem
+        else:
+            # Nếu target là Image/Video/File thì snap indicator về Item cha.
+            # Vì con trỏ đang nằm trong vùng con của Item, vị trí hợp lý là dưới Item.
+            if target is target_item:
+                drop_position = self._drop_position_for_item_rect(target_item, pos)
+            else:
+                drop_position = QAbstractItemView.DropIndicatorPosition.BelowItem
+
+        if not self._item_move_would_change(source, target_item, drop_position):
+            return None
+        return target_item, drop_position
+
+    def _can_drop_internal_at(self, pos):
+        return self._drop_info_at(pos) is not None
 
     @staticmethod
     def _insert_after_drop_position(drop_position):
@@ -188,6 +340,61 @@ class DraggableTreeWidget(QTreeWidget):
             QAbstractItemView.DropIndicatorPosition.OnItem,
             QAbstractItemView.DropIndicatorPosition.BelowItem,
         )
+
+    def _project_insert_index(self, source, target_project, drop_position):
+        source_index = self.indexOfTopLevelItem(source)
+        if source_index < 0:
+            return -1
+
+        if target_project is None:
+            insert_index = self.topLevelItemCount()
+        else:
+            target_index = self.indexOfTopLevelItem(target_project)
+            if target_index < 0:
+                return -1
+            insert_index = target_index + (
+                1 if self._insert_after_drop_position(drop_position) else 0
+            )
+
+        if source_index < insert_index:
+            insert_index -= 1
+        return insert_index
+
+    def _project_move_would_change(self, source, target_project, drop_position):
+        source_index = self.indexOfTopLevelItem(source)
+        insert_index = self._project_insert_index(source, target_project, drop_position)
+        return source_index >= 0 and insert_index >= 0 and insert_index != source_index
+
+    def _item_insert_index(self, source, target_item, drop_position):
+        project_item = source.parent()
+        if project_item is None:
+            return -1
+
+        source_index = project_item.indexOfChild(source)
+        if source_index < 0:
+            return -1
+
+        if target_item is None:
+            insert_index = project_item.childCount()
+        else:
+            target_index = project_item.indexOfChild(target_item)
+            if target_index < 0:
+                return -1
+            insert_index = target_index + (
+                1 if self._insert_after_drop_position(drop_position) else 0
+            )
+
+        if source_index < insert_index:
+            insert_index -= 1
+        return insert_index
+
+    def _item_move_would_change(self, source, target_item, drop_position):
+        project_item = source.parent()
+        if project_item is None:
+            return False
+        source_index = project_item.indexOfChild(source)
+        insert_index = self._item_insert_index(source, target_item, drop_position)
+        return source_index >= 0 and insert_index >= 0 and insert_index != source_index
 
     def _move_internal_item(self, source, target, drop_position):
         kind = self._node_kind(source)
@@ -236,7 +443,6 @@ class DraggableTreeWidget(QTreeWidget):
             return False
 
         if target is None:
-            target_item = None
             insert_index = project_item.childCount()
         else:
             if self._project_item_of(target) is not project_item:
