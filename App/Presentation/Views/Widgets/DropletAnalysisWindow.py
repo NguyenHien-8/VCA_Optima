@@ -18,6 +18,7 @@ from matplotlib.patches import Arc, FancyArrowPatch, Rectangle
 
 from App.Models.Analysis.AnalysisManager import AnalysisManager
 from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet, resource_path
+from App.Infrastructure.Helpers.WindowOwnershipHelper import configure_owned_window
 from App.Presentation.ViewModels.Workers import FunctionWorker
 
 
@@ -57,9 +58,8 @@ class DropletAnalysisWindow(QMainWindow):
     SELECTION_DRAG_THRESHOLD_PX = 5
 
     def __init__(self, view_model, pixmap, parent=None, source_image_path=None, item_path=None):
-        # Retain Qt ownership through parent, but make this an OS-managed
-        # top-level window. Without Qt.Window, minimizing several analysis
-        # windows stacks their compact title bars at the bottom of ImageEditor.
+        # Parent is the top-level MainView owner; source/save context is passed
+        # separately so native ownership never depends on the ImageEditor tab.
         super().__init__(parent, Qt.WindowType.Window)
         DropletAnalysisWindow._instances.append(self)
 
@@ -156,6 +156,7 @@ class DropletAnalysisWindow(QMainWindow):
 
         self.setup_ui()
         self.load_style()
+        configure_owned_window(self, parent)
 
         self._mpl_connection_ids = [
             self.canvas.mpl_connect('scroll_event', self.on_scroll),
@@ -165,6 +166,10 @@ class DropletAnalysisWindow(QMainWindow):
         ]
 
         self.view_model.load_image_from_pixmap(self.input_pixmap)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        configure_owned_window(self, self.parent())
 
     # =========================
     # UI

@@ -10,7 +10,7 @@
 
 - `Presentation/` — Views, ViewModels, worker và signal/slot điều phối UI.
 - `Models/` — project/session, camera, serial, media và thuật toán phân tích giọt.
-- `Infrastructure/` — SQLite repositories, đường dẫn dữ liệu, resource helper và crash handler.
+- `Infrastructure/` — SQLite repositories, đường dẫn dữ liệu, resource/window helper và crash handler.
 - `ReSource/` — QSS, SVG, ICO và splash screen.
 - `__init__.py` — package marker.
 
@@ -21,7 +21,8 @@
 - SideBar dò nội dung `Image/Video` bằng hàng đợi scanner nền giới hạn đồng thời; branch indicator phản ánh nội dung thật mà không cần click để kích hoạt lazy load.
 - Droplet Auto Detect dùng baseline làm ràng buộc hình học: mask bỏ substrate/reflection, cắt contour tails có clearance thấp, kiểm tra hai baseline anchors làm contact hints và lấy mẫu liquid-cap arc đều theo arc length.
 - Droplet Measure Point hỗ trợ drag-select bằng selection rectangle: point được chọn được render màu đen, menu chuột phải chỉ hiện `Delete` khi có selection hợp lệ, và xóa theo index đã chọn trước khi dựng lại overlay.
-- Các `QMainWindow` phụ (File Editor và Droplet Analysis) giữ quan hệ sở hữu với cửa sổ gọi nhưng luôn mang cờ `Qt.Window`; vì vậy hệ điều hành quản lý minimize/maximize độc lập và không xếp các title bar thu nhỏ trong vùng client của ứng dụng. Analysis window dùng `WA_DeleteOnClose` để giải phóng instance đã đóng.
+- `WindowOwnershipHelper` chuẩn hóa secondary-window policy: owner luôn là top-level `MainView`, Qt transient parent duy trì Z-order/minimize-restore theo owner, còn Win32 `WS_EX_APPWINDOW` giữ thumbnail của cửa sổ phụ trong nhóm taskbar. Runtime và shortcut installer dùng chung AppUserModelID `TNH.Optima`.
+- File Editor và Droplet Analysis dùng cùng chính sách owned top-level window; Analysis window có `WA_DeleteOnClose` để giải phóng instance đã đóng. ImageEditor truyền source path tách biệt với owner nên lưu kết quả phân tích vẫn đúng Item.
 - OpenCV, NumPy, Matplotlib và các editor nặng chỉ được import khi feature tương ứng được mở.
 - File text được ghi nguyên tử; SQLite dùng context manager; đường dẫn và tên tài nguyên được kiểm tra trước thao tác phá hủy.
 - `CrashHandler` ghi rotating log, cài exception hook cho main/background thread và bật `faulthandler`.
@@ -35,5 +36,6 @@
 5. Media scan nền cập nhật cache và `ChildIndicatorPolicy`; khi người dùng mở node, danh sách cache được render ngay.
 6. Trong Droplet Analysis, baseline coefficients/anchors + image đi qua worker → liquid-cap contour + contact endpoints → ellipse/circle fit → overlay và contact angles.
 7. Trong chế độ Measure Point, click vùng trống thêm point, drag vùng trống tạo selection rectangle, chuột phải selection → `Delete` → rebuild overlay từ danh sách point còn lại.
-8. Mở File Editor/Droplet Analysis → tạo owned top-level window (`parent` + `Qt.Window`) → minimize/maximize do window manager xử lý ngoài layout của MainView.
-9. Khi đóng, editor chờ worker hoàn tất theo tín hiệu, sau đó giải phóng camera, serial, multimedia, Matplotlib và lưu session.
+8. Startup đặt process AppUserModelID → mở File Editor/Droplet Analysis → gán MainView làm transient owner → áp dụng taskbar style → Windows gom thumbnail dưới một biểu tượng TNH Optima.
+9. MainView minimize/restore → Windows phối hợp các owned windows; chọn thumbnail cửa sổ phụ → khôi phục/activate đúng window mà không tạo caption thu nhỏ trên desktop.
+10. Khi đóng, editor chờ worker hoàn tất theo tín hiệu, sau đó giải phóng camera, serial, multimedia, Matplotlib và lưu session.

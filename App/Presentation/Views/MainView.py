@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt, pyqtSlot, QFileInfo, QTimer, QPoint
 from PyQt6.QtGui import QCloseEvent
 
 from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
+from App.Infrastructure.Helpers.WindowOwnershipHelper import configure_owned_window
 from App.Presentation.ViewModels.MainViewModel import MainViewModel
 from App.Presentation.Views.MenuBar import MenuBar
 from App.Presentation.Views.Widgets.SideBar import ProjectSidebar
@@ -21,10 +22,8 @@ class FileEditorWindow(QMainWindow):
     Uses QMainWindow so the OS window has minimize / maximize / close / resize.
     """
     def __init__(self, main_view, editor_widget, view_model):
-        # A QMainWindow with a parent but without Qt.Window is treated as a
-        # child widget. On Windows, minimizing such a widget creates a compact
-        # title bar inside the parent's client area. Keep ownership through
-        # main_view while explicitly creating an OS-managed top-level window.
+        # Keep MainView as the explicit owner. WindowOwnershipHelper adds the
+        # native taskbar policy without breaking the owner/Z-order relationship.
         super().__init__(main_view, Qt.WindowType.Window)
         self.main_view = main_view
         self.editor_widget = editor_widget
@@ -42,6 +41,7 @@ class FileEditorWindow(QMainWindow):
             self.view_model.storage_target_changed.connect(self._on_storage_target_changed)
         if hasattr(self.view_model, "close_ready"):
             self.view_model.close_ready.connect(self._on_close_ready)
+        configure_owned_window(self, self.main_view)
 
     def _apply_window_title(self):
         project_name = getattr(self.view_model, "project_name", "")
@@ -59,6 +59,7 @@ class FileEditorWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
+        configure_owned_window(self, self.main_view)
         if not self._opened:
             self._opened = True
             self.main_view.view_model.on_editor_opened()

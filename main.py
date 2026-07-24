@@ -8,11 +8,17 @@ from App.Infrastructure.CrashHandler import (
 def main():
     install_exception_hooks()
     try:
+        from App.Infrastructure.Helpers.WindowOwnershipHelper import (
+            initialize_taskbar_identity,
+        )
         from PyQt6.QtCore import Qt
         from PyQt6.QtGui import QIcon, QPixmap
         from PyQt6.QtWidgets import QApplication, QSplashScreen
         from App.Infrastructure.Helpers.ResourceHelper import icon_path
 
+        # Must run before the first native window is created so the main window
+        # and all owned windows share one stable Windows taskbar group.
+        initialize_taskbar_identity()
         app = QApplication(sys.argv)
         app.setApplicationName("TNH Optima")
         app.setOrganizationName("TNH")
