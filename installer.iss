@@ -1,7 +1,7 @@
 #define MyAppName "TNH Optima"
 #define MyAppVersion "1.1.0"
 #define MyAppPublisher "TNH"
-#define MyAppURL "https://github.com/NguyenHien-8/VCA_Optima/tree/Ver1.1"
+#define MyAppURL "https://github.com/NguyenHien-8/VCA_Optima"
 #define MyAppExeName "TNH Optima.exe"
 #define MyAppUserModelID "TNH.Optima"
 
@@ -16,18 +16,19 @@ AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
+DisableDirPage=no
 DisableProgramGroupPage=yes
-LicenseFile=
-InfoBeforeFile=
-InfoAfterFile=
-OutputDir=Output
-OutputBaseFilename=TNH_Optima_{#MyAppVersion}
+LicenseFile=LICENSE
+OutputDir=Folder Download Software
+OutputBaseFilename=TNH_Optima_Setup_{#MyAppVersion}
 SetupIconFile=App\ReSource\Icon\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+CloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

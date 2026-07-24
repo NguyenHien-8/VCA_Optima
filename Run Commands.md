@@ -24,10 +24,6 @@ python -m pip install --upgrade pip
 python -m pip install -r .\Release_1.1.0\requirements.txt
 ```
 
-## Đóng gói PyInstaller
-
-Chạy trong thư mục `Release_1.1.0`:
-
 ```powershell
 python -m PyInstaller --clean --noconfirm .\TNH_Optima.spec
 ```

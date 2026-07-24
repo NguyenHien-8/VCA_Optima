@@ -1,69 +1,34 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import (
-    collect_submodules,
-    collect_data_files,
-    collect_dynamic_libs
-)
+from pathlib import Path
+
+from build_installer import compile_installer
 
 block_cipher = None
+project_dir = Path(SPECPATH).resolve()
 
-hidden_imports = []
-hidden_imports += collect_submodules('serial')
-hidden_imports += collect_submodules('cv2')
-hidden_imports += collect_submodules('PyQt6')
-hidden_imports += collect_submodules('PyQt6.QtMultimedia')
-hidden_imports += collect_submodules('PyQt6.QtMultimediaWidgets')
-
-# Nếu code dùng thư viện lấy tên camera kiểu Windows friendly name,
-# Hãy bỏ comment các dòng tương ứng:
-# hidden_imports += collect_submodules('pygrabber')
-# hidden_imports += collect_submodules('comtypes')
-# hidden_imports += collect_submodules('wmi')
-# hidden_imports += collect_submodules('pythoncom')
-# hidden_imports += collect_submodules('win32com')
-
+# PyInstaller's standard hooks collect the native libraries and Qt plugins for
+# the modules imported by the application. Do not collect the whole PyQt6
+# package: doing so adds unused QML, Qt3D, Bluetooth, WebEngine and .sip sources.
 datas = [
-    ('App', 'App'),
+    (str(project_dir / 'App/ReSource'), 'App/ReSource'),
 ]
 
-# Thu thập thêm data/plugin của Qt và cv2
-datas += collect_data_files('PyQt6')
-datas += collect_data_files('cv2')
-
-binaries = []
-binaries += collect_dynamic_libs('cv2')
-binaries += collect_dynamic_libs('PyQt6')
-
 a = Analysis(
-    ['main.py'],
-    pathex=['.'],
-    binaries=binaries,
+    [str(project_dir / 'main.py')],
+    pathex=[str(project_dir)],
+    binaries=[],
     datas=datas,
-    hiddenimports=hidden_imports + [
+    hiddenimports=[
         'cv2',
         'numpy',
-        'scipy',
         'scipy.optimize',
-        'scipy.signal',
-        'scipy.spatial',
-        'scipy.integrate',
-        'scipy.stats',
-        'scipy.spatial.transform._rotation_groups',
+        'scipy.linalg',
         'serial',
-        'serial.tools',
         'serial.tools.list_ports',
-        'PIL',
         'PIL.Image',
         'PIL.ImageQt',
-        'PIL.ImageDraw',
-        'PIL.ImageFilter',
-        'PIL.ImageFont',
-        'matplotlib',
         'matplotlib.backends.backend_qt5agg',
-        'App',
-        'App.Presentation',
-        'App.Models',
         'sqlite3',
         'PyQt6.QtMultimedia',
         'PyQt6.QtMultimediaWidgets',
@@ -93,7 +58,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='App/ReSource/Icon/app_icon.ico'
+    icon=str(project_dir / 'App/ReSource/Icon/app_icon.ico')
 )
 
 coll = COLLECT(
@@ -105,3 +70,7 @@ coll = COLLECT(
     upx_exclude=[],
     name='TNH Optima',
 )
+
+# PyInstaller only creates the runnable application under dist/. Compile the
+# actual Windows setup program after COLLECT has completed successfully.
+compile_installer(project_dir)
