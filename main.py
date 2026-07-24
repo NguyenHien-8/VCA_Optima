@@ -17,7 +17,7 @@ def main():
         from App.Infrastructure.Helpers.ResourceHelper import icon_path
 
         # Must run before the first native window is created so the main window
-        # and all owned windows share one stable Windows taskbar group.
+        # and all secondary windows share one stable Windows taskbar group.
         initialize_taskbar_identity()
         app = QApplication(sys.argv)
         app.setApplicationName("TNH Optima")

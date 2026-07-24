@@ -1,4 +1,8 @@
-# App/Infrastructure/Helpers/WindowOwnershipHelper.py
+###########################################################
+# @file App/Infrastructure/Helpers/WindowOwnershipHelper.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+###########################################################
 import ctypes
 import logging
 import sys
@@ -48,11 +52,14 @@ def initialize_taskbar_identity(app_user_model_id=APP_USER_MODEL_ID):
 
 
 def resolve_window_owner(widget):
-    """Return the top-level QWidget that should own a secondary window."""
+    """Return the root MainView that should coordinate a secondary window."""
     if widget is None:
         return None
 
     try:
+        main_view = getattr(widget, "main_view", None)
+        if main_view is not None and main_view is not widget:
+            widget = main_view
         owner = widget.window()
     except (AttributeError, RuntimeError):
         return None
@@ -60,36 +67,42 @@ def resolve_window_owner(widget):
     return owner if owner is not None else widget
 
 
-def configure_owned_window(window, owner, show_in_taskbar=True):
+def configure_secondary_window(window, owner, show_in_taskbar=True):
     """
-    Apply a consistent owner and taskbar policy to a secondary top-level window.
+    Apply the taskbar policy and register a secondary top-level window.
 
-    Qt's transient parent provides native owner/Z-order/minimize coordination.
-    On Windows, WS_EX_APPWINDOW keeps the owned window eligible for a grouped
-    taskbar thumbnail, while removing WS_EX_TOOLWINDOW avoids conflicting shell
-    treatment. The operation is idempotent and safe to repeat from showEvent.
+    The owner is deliberately logical rather than a native transient parent.
+    Native owned windows are restored automatically when Windows restores their
+    owner, which prevents secondary windows from remaining minimized. MainView
+    coordinates minimize explicitly instead, while WS_EX_APPWINDOW keeps every
+    secondary window eligible for its own grouped taskbar thumbnail.
+
+    The operation is idempotent and safe to repeat from showEvent.
     """
     owner = resolve_window_owner(owner)
     if window is None or owner is None or owner is window:
         return False
 
     try:
-        # winId() creates the native handles before the first show, allowing the
+        # winId() creates the native handle before the first show, allowing the
         # taskbar style to be correct from the first visible frame.
-        owner.winId()
         window.winId()
-        owner_handle = owner.windowHandle()
-        window_handle = window.windowHandle()
-        if owner_handle is None or window_handle is None:
-            return False
-        window_handle.setTransientParent(owner_handle)
     except (AttributeError, RuntimeError):
-        logger.exception("Could not assign the native owner window.")
+        logger.exception("Could not initialize the secondary window.")
         return False
+
+    register_window = getattr(owner, "register_secondary_window", None)
+    if callable(register_window):
+        register_window(window)
 
     if show_in_taskbar and sys.platform.startswith("win"):
         return _enable_windows_taskbar_thumbnail(window)
     return True
+
+
+# Compatibility for callers outside this package. The policy is no longer
+# native ownership; new code should use configure_secondary_window.
+configure_owned_window = configure_secondary_window
 
 
 def _enable_windows_taskbar_thumbnail(window):

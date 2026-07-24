@@ -1,12 +1,13 @@
 import os
+import weakref
 from PyQt6.QtWidgets import (QMainWindow, QVBoxLayout, QWidget,
                              QFileDialog, QInputDialog, QMessageBox, QDialog,
                              QStatusBar, QDockWidget, QTextEdit, QMenu)
-from PyQt6.QtCore import Qt, pyqtSlot, QFileInfo, QTimer, QPoint
+from PyQt6.QtCore import Qt, QEvent, pyqtSlot, QFileInfo, QTimer, QPoint
 from PyQt6.QtGui import QCloseEvent
 
 from App.Infrastructure.Helpers.ResourceHelper import apply_stylesheet
-from App.Infrastructure.Helpers.WindowOwnershipHelper import configure_owned_window
+from App.Infrastructure.Helpers.WindowOwnershipHelper import configure_secondary_window
 from App.Presentation.ViewModels.MainViewModel import MainViewModel
 from App.Presentation.Views.MenuBar import MenuBar
 from App.Presentation.Views.Widgets.SideBar import ProjectSidebar
@@ -22,9 +23,9 @@ class FileEditorWindow(QMainWindow):
     Uses QMainWindow so the OS window has minimize / maximize / close / resize.
     """
     def __init__(self, main_view, editor_widget, view_model):
-        # Keep MainView as the explicit owner. WindowOwnershipHelper adds the
-        # native taskbar policy without breaking the owner/Z-order relationship.
-        super().__init__(main_view, Qt.WindowType.Window)
+        # Keep this native window independent from MainView. Windows otherwise
+        # restores every owned window together with its owner.
+        super().__init__(None, Qt.WindowType.Window)
         self.main_view = main_view
         self.editor_widget = editor_widget
         self.view_model = view_model
@@ -41,7 +42,7 @@ class FileEditorWindow(QMainWindow):
             self.view_model.storage_target_changed.connect(self._on_storage_target_changed)
         if hasattr(self.view_model, "close_ready"):
             self.view_model.close_ready.connect(self._on_close_ready)
-        configure_owned_window(self, self.main_view)
+        configure_secondary_window(self, self.main_view)
 
     def _apply_window_title(self):
         project_name = getattr(self.view_model, "project_name", "")
@@ -59,7 +60,7 @@ class FileEditorWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
-        configure_owned_window(self, self.main_view)
+        configure_secondary_window(self, self.main_view)
         if not self._opened:
             self._opened = True
             self.main_view.view_model.on_editor_opened()
@@ -107,6 +108,7 @@ class FileEditorWindow(QMainWindow):
 class MainView(QMainWindow):
     def __init__(self, view_model=None):
         super().__init__()
+        self._secondary_windows = weakref.WeakSet()
         self.setWindowTitle("TNH Optima")
         self.resize(1000, 700)
 
@@ -157,6 +159,29 @@ class MainView(QMainWindow):
 
         self.sidebar.project_tree.itemSelectionChanged.connect(self._on_sidebar_selection_changed)
         QTimer.singleShot(0, self.view_model.start_deferred_initialization)
+
+    def register_secondary_window(self, window):
+        """Track a taskbar window whose minimize state follows MainView."""
+        if window is not None and window is not self:
+            self._secondary_windows.add(window)
+
+    def _minimize_secondary_windows(self):
+        for window in tuple(self._secondary_windows):
+            try:
+                if window.isVisible() and not window.isMinimized():
+                    window.showMinimized()
+            except RuntimeError:
+                # The underlying QObject may already have been deleted.
+                self._secondary_windows.discard(window)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if (
+            event.type() == QEvent.Type.WindowStateChange
+            and self.isMinimized()
+            and not (event.oldState() & Qt.WindowState.WindowMinimized)
+        ):
+            self._minimize_secondary_windows()
 
     def _connect_view_model_signals(self):
         self.view_model.status_message.connect(self.system_status_bar.showMessage)
