@@ -1049,6 +1049,13 @@ class DropletAnalysisWindow(QMainWindow):
         if self.view_model.image_array is None:
             QMessageBox.warning(self, "No Image", "No image loaded.")
             return
+        if self.baseline_coeffs is None:
+            QMessageBox.warning(
+                self,
+                "Baseline Required",
+                "Please define the droplet baseline before using Auto Detect Edge.",
+            )
+            return
 
         num_points, ok = QInputDialog.getInt(
             self, "Auto Detect Edge",
@@ -1065,10 +1072,12 @@ class DropletAnalysisWindow(QMainWindow):
                 image_array,
                 num_points,
                 physical_width=5.0,
-                physical_height=3.0
+                physical_height=3.0,
+                baseline_coeffs=baseline_coeffs,
             )
 
         image_array = self.view_model.image_array.copy()
+        baseline_coeffs = tuple(self.baseline_coeffs)
         self.btn_auto_detect.setEnabled(False)
         self.update_info_text("Detecting droplet edge...")
         self._start_analysis_worker(detect_edges, self._on_edges_detected)
@@ -1080,7 +1089,10 @@ class DropletAnalysisWindow(QMainWindow):
             return
         self.measurement_points = new_points
         self._draw_measurement_points()
-        self.update_info_text(f"Auto detected {len(new_points)} edge points.")
+        self.update_info_text(
+            f"Auto detected {len(new_points)} droplet-edge points "
+            "above the baseline."
+        )
 
     def _start_analysis_worker(self, function, callback):
         worker = FunctionWorker(function)

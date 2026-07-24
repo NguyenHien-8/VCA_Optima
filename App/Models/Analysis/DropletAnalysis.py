@@ -784,75 +784,277 @@ def compute_contact_angle_from_circle(
     }
 
 # ========================================================================
-# AUTOMATIC EDGE DETECTION FUNCTION (Kept unchanged)
+# BASELINE-CONSTRAINED AUTOMATIC EDGE DETECTION
 # ========================================================================
 
-def auto_detect_edge_points(image_array: np.ndarray, num_points: int,
-                            physical_width: float = 5.0, physical_height: float = 3.0) -> List[Tuple[float, float]]:
-    """
-    Detect edge points by finding the largest external contour, removing the bottom part (baseline),
-    and converting to physical coordinates.
-    """
-    if image_array.dtype != np.uint8:
-        if image_array.max() <= 1.0:
-            img = (image_array * 255).astype(np.uint8)
+def _as_grayscale_uint8(image_array: np.ndarray) -> Optional[np.ndarray]:
+    """Return a finite contiguous grayscale image suitable for OpenCV."""
+    if not isinstance(image_array, np.ndarray) or image_array.size == 0:
+        return None
+
+    image = image_array
+    if image.ndim == 3:
+        if image.shape[2] == 4:
+            image = cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+        elif image.shape[2] == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         else:
-            img = np.clip(image_array, 0, 255).astype(np.uint8)
-    else:
-        img = image_array.copy()
+            return None
+    elif image.ndim != 2:
+        return None
 
-    # 1. Preprocessing
-    blurred = cv2.GaussianBlur(img, (7, 7), 0)
+    if image.dtype == np.uint8:
+        return np.ascontiguousarray(image)
 
-    # 2. Thresholding
-    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    finite = np.nan_to_num(image, nan=0.0, posinf=255.0, neginf=0.0)
+    max_value = float(np.max(finite))
+    min_value = float(np.min(finite))
+    if 0.0 <= min_value and max_value <= 1.0:
+        finite = finite * 255.0
+    return np.ascontiguousarray(np.clip(finite, 0, 255).astype(np.uint8))
 
-    # Close small noise holes using Morphology
-    kernel = np.ones((5, 5), np.uint8)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
-    # 3. Find contours
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+def _baseline_clearance(
+    points_px: np.ndarray,
+    baseline_coeffs: Tuple[float, float, float],
+    scale_x: float,
+    scale_y: float,
+    physical_height: float,
+) -> np.ndarray:
+    """Vertical physical distance from each image point to the baseline."""
+    a_line, b_line, c_line = (float(value) for value in baseline_coeffs)
+    if abs(b_line) <= 1e-12:
+        raise ValueError("Baseline must not be vertical.")
 
+    x_phys = points_px[:, 0].astype(np.float64) * scale_x
+    y_phys = physical_height - (
+        points_px[:, 1].astype(np.float64) * scale_y
+    )
+    baseline_y = -(a_line * x_phys + c_line) / b_line
+    return y_phys - baseline_y
+
+
+def _longest_valid_contour_arc(
+    contour_points: np.ndarray,
+    valid_mask: np.ndarray,
+) -> Optional[np.ndarray]:
+    """Return the strongest continuous contour run above the baseline."""
+    point_count = len(contour_points)
+    if point_count < 2 or not np.any(valid_mask):
+        return None
+    if np.all(valid_mask):
+        return contour_points
+
+    first_invalid = int(np.flatnonzero(~valid_mask)[0])
+    start = (first_invalid + 1) % point_count
+    rolled_points = np.concatenate(
+        (contour_points[start:], contour_points[:start]), axis=0
+    )
+    rolled_valid = np.concatenate(
+        (valid_mask[start:], valid_mask[:start]), axis=0
+    )
+
+    runs = []
+    run_start = None
+    for index, is_valid in enumerate(rolled_valid):
+        if is_valid and run_start is None:
+            run_start = index
+        elif not is_valid and run_start is not None:
+            runs.append(rolled_points[run_start:index])
+            run_start = None
+    if run_start is not None:
+        runs.append(rolled_points[run_start:])
+    if not runs:
+        return None
+
+    def run_score(run):
+        if len(run) < 2:
+            return 0.0
+        segments = np.diff(run.astype(np.float64), axis=0)
+        return float(np.sum(np.hypot(segments[:, 0], segments[:, 1])))
+
+    return max(runs, key=run_score)
+
+
+def _resample_contour_arc(
+    contour_arc: np.ndarray,
+    num_points: int,
+) -> Optional[np.ndarray]:
+    """Sample a contour at uniform arc-length intervals."""
+    if contour_arc is None or len(contour_arc) < 2 or num_points <= 0:
+        return None
+
+    points = contour_arc.astype(np.float64)
+    keep = np.ones(len(points), dtype=bool)
+    keep[1:] = np.any(np.diff(points, axis=0) != 0, axis=1)
+    points = points[keep]
+    if len(points) < 2:
+        return None
+
+    segment_lengths = np.hypot(
+        np.diff(points[:, 0]), np.diff(points[:, 1])
+    )
+    cumulative = np.concatenate(([0.0], np.cumsum(segment_lengths)))
+    if cumulative[-1] <= 1e-12:
+        return None
+
+    targets = np.linspace(0.0, cumulative[-1], num_points)
+    sampled = np.column_stack(
+        (
+            np.interp(targets, cumulative, points[:, 0]),
+            np.interp(targets, cumulative, points[:, 1]),
+        )
+    )
+    if sampled[0, 0] > sampled[-1, 0]:
+        sampled = sampled[::-1]
+    return sampled
+
+
+def auto_detect_edge_points(
+    image_array: np.ndarray,
+    num_points: int,
+    physical_width: float = 5.0,
+    physical_height: float = 3.0,
+    baseline_coeffs: Optional[Tuple[float, float, float]] = None,
+    baseline_margin_pixels: float = 2.0,
+) -> List[Tuple[float, float]]:
+    """
+    Detect the liquid-cap silhouette strictly above a user-defined baseline.
+
+    The baseline first masks the substrate/reflection half-plane. Candidate
+    contours must have meaningful height above that line. The longest continuous
+    arc above a small clearance is then sampled uniformly by arc length.
+    """
+    try:
+        requested_points = int(num_points)
+        width_phys = float(physical_width)
+        height_phys = float(physical_height)
+        margin_pixels = max(0.5, float(baseline_margin_pixels))
+    except (TypeError, ValueError):
+        return []
+    if (
+        requested_points <= 0
+        or width_phys <= 0
+        or height_phys <= 0
+        or baseline_coeffs is None
+        or len(baseline_coeffs) != 3
+    ):
+        return []
+
+    image = _as_grayscale_uint8(image_array)
+    if image is None:
+        return []
+    height_px, width_px = image.shape
+    if height_px < 8 or width_px < 8:
+        return []
+
+    scale_x = width_phys / max(width_px - 1, 1)
+    scale_y = height_phys / max(height_px - 1, 1)
+    x_pixels = np.arange(width_px, dtype=np.float64)
+    x_phys = x_pixels * scale_x
+    a_line, b_line, c_line = (float(value) for value in baseline_coeffs)
+    if (
+        not np.all(np.isfinite((a_line, b_line, c_line)))
+        or abs(b_line) <= 1e-12
+    ):
+        return []
+
+    baseline_y = -(a_line * x_phys + c_line) / b_line
+    y_phys = height_phys - (
+        np.arange(height_px, dtype=np.float64)[:, None] * scale_y
+    )
+    above_baseline = y_phys >= baseline_y[None, :]
+    if not np.any(above_baseline):
+        return []
+
+    blurred = cv2.GaussianBlur(image, (7, 7), 0)
+    masked_image = blurred.copy()
+    masked_image[~above_baseline] = 255
+    _, binary = cv2.threshold(
+        masked_image,
+        0,
+        255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
+    )
+    binary[~above_baseline] = 0
+
+    kernel_size = int(round(min(height_px, width_px) * 0.006))
+    kernel_size = min(9, max(3, kernel_size | 1))
+    close_kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    binary = cv2.morphologyEx(
+        binary, cv2.MORPH_CLOSE, close_kernel
+    )
+    binary = cv2.morphologyEx(
+        binary, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)
+    )
+    binary[~above_baseline] = 0
+    binary[[0, -1], :] = 0
+    binary[:, [0, -1]] = 0
+
+    contours, _ = cv2.findContours(
+        binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
+    )
     if not contours:
         return []
 
-    # 4. Largest contour
-    largest_contour = max(contours, key=cv2.contourArea)
-    contour_points = largest_contour.squeeze()
+    clearance_margin = margin_pixels * scale_y
+    minimum_cap_height = max(6.0 * scale_y, 0.03 * height_phys)
+    minimum_area = max(20.0, height_px * width_px * 0.00025)
+    best_arc = None
+    best_score = -np.inf
 
-    if len(contour_points.shape) == 1:
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        if area < minimum_area:
+            continue
+        contour_points = contour.reshape(-1, 2)
+        if len(contour_points) < 6:
+            continue
+        try:
+            clearance = _baseline_clearance(
+                contour_points,
+                (a_line, b_line, c_line),
+                scale_x,
+                scale_y,
+                height_phys,
+            )
+        except ValueError:
+            return []
+
+        if float(np.max(clearance)) < minimum_cap_height:
+            continue
+        valid = clearance > clearance_margin
+        arc = _longest_valid_contour_arc(contour_points, valid)
+        if arc is None or len(arc) < 5:
+            continue
+
+        x_span = float(np.ptp(arc[:, 0]))
+        y_span = float(np.ptp(arc[:, 1]))
+        if x_span < width_px * 0.02 or y_span < height_px * 0.02:
+            continue
+        arc_segments = np.diff(arc.astype(np.float64), axis=0)
+        arc_length = float(
+            np.sum(np.hypot(arc_segments[:, 0], arc_segments[:, 1]))
+        )
+        cap_height = float(np.max(clearance))
+        score = arc_length * (1.0 + cap_height / height_phys)
+        score += 0.01 * np.sqrt(area)
+        if score > best_score:
+            best_score = score
+            best_arc = arc
+
+    sampled = _resample_contour_arc(best_arc, requested_points)
+    if sampled is None:
         return []
 
-    # 5. Remove bottom baseline region
-    max_y = np.max(contour_points[:, 1])
-    min_y = np.min(contour_points[:, 1])
-    y_cutoff = max_y - (max_y - min_y) * 0.10
-
-    filtered_points = np.array([pt for pt in contour_points if pt[1] < y_cutoff])
-
-    if len(filtered_points) < num_points:
-        filtered_points = contour_points
-
-    # Sort by x
-    filtered_points = filtered_points[np.argsort(filtered_points[:, 0])]
-
-    # 6. Uniform sampling
-    if len(filtered_points) > num_points:
-        indices = np.linspace(0, len(filtered_points) - 1, num_points, dtype=int)
-        selected_points = filtered_points[indices]
-    else:
-        selected_points = filtered_points
-
-    # 7. Convert to physical coordinates
-    height_px, width_px = image_array.shape[:2]
-    scale_x = physical_width / width_px
-    scale_y = physical_height / height_px
-
-    result = []
-    for x, y in selected_points:
-        phys_x = x * scale_x
-        phys_y = physical_height - (y * scale_y)
-        result.append((float(phys_x), float(phys_y)))
-
-    return result
+    x_values = sampled[:, 0] * scale_x
+    y_values = height_phys - (sampled[:, 1] * scale_y)
+    baseline_values = -(a_line * x_values + c_line) / b_line
+    valid_output = y_values > baseline_values
+    return [
+        (float(x_value), float(y_value))
+        for x_value, y_value, is_valid in zip(
+            x_values, y_values, valid_output
+        )
+        if is_valid
+    ]

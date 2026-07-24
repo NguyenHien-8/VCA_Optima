@@ -19,6 +19,7 @@
 - `FunctionWorker`, các worker chuyên biệt và Qt queued signals đưa tác vụ blocking ra khỏi UI thread.
 - Camera, recorder, filesystem scanner và editor sử dụng cooperative shutdown; `finished` kết hợp `deleteLater()` để giải phóng đúng vòng đời.
 - SideBar dò nội dung `Image/Video` bằng hàng đợi scanner nền giới hạn đồng thời; branch indicator phản ánh nội dung thật mà không cần click để kích hoạt lazy load.
+- Droplet Auto Detect dùng baseline làm ràng buộc hình học: mask bỏ substrate/reflection trước phân đoạn, chọn cung contour liên tục của liquid cap và lấy mẫu đều theo arc length.
 - OpenCV, NumPy, Matplotlib và các editor nặng chỉ được import khi feature tương ứng được mở.
 - File text được ghi nguyên tử; SQLite dùng context manager; đường dẫn và tên tài nguyên được kiểm tra trước thao tác phá hủy.
 - `CrashHandler` ghi rotating log, cài exception hook cho main/background thread và bật `faulthandler`.
@@ -30,4 +31,5 @@
 3. Worker trả kết quả bằng signal về UI thread.
 4. Capture/record thành công phát `media_created` → SideBar cập nhật ngay; `QFileSystemWatcher` vẫn đồng bộ thay đổi từ bên ngoài.
 5. Media scan nền cập nhật cache và `ChildIndicatorPolicy`; khi người dùng mở node, danh sách cache được render ngay.
-6. Khi đóng, editor chờ worker hoàn tất theo tín hiệu, sau đó giải phóng camera, serial, multimedia, Matplotlib và lưu session.
+6. Trong Droplet Analysis, baseline + image đi qua worker → các điểm biên phía trên baseline → ellipse/circle fit → overlay và contact angles.
+7. Khi đóng, editor chờ worker hoàn tất theo tín hiệu, sau đó giải phóng camera, serial, multimedia, Matplotlib và lưu session.
