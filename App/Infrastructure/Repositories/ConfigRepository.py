@@ -1,4 +1,8 @@
-# App/Infrastructure/Repositories/ConfigRepository.py
+###########################################################
+# @file App/Infrastructure/Repositories/ConfigRepository.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+###########################################################
 import sqlite3
 import os
 from contextlib import contextmanager

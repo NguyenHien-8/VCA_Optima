@@ -1,4 +1,8 @@
-# App/Infrastructure/Repositories/SessionRepository.py
+############################################################
+# @file App/Infrastructure/Repositories/SessionRepository.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+############################################################
 import sqlite3
 import os
 import json

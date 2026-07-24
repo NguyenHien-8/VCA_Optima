@@ -1,4 +1,8 @@
-# App/Infrastructure/Helpers/ResourceHelper.py
+########################################################
+# @file App/Infrastructure/Helpers/ResourceHelper.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 from functools import lru_cache
 from pathlib import Path
 import sys

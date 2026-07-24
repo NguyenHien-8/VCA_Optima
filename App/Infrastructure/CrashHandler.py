@@ -1,3 +1,8 @@
+########################################################
+# @file App/Infrastructure/CrashHandler.py
+# Author: TRAN NGUYEN HIEN
+# Email: trannguyenhien29085@gmail.com
+########################################################
 import faulthandler
 import logging
 from logging.handlers import RotatingFileHandler
